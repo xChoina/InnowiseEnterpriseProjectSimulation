@@ -53,7 +53,7 @@ Architecture diagrams are included with the Stage 2 files:
 Main file:
 
 ```text
-stage1_new.ipynb
+stage1.ipynb
 ```
 
 ## Source files
@@ -228,7 +228,7 @@ The RFM result is loaded into the Stage layer in Stage 2 and later enriches the 
 Main file:
 
 ```text
-stage2_new.ipynb
+stage2.ipynb
 ```
 
 Stage 2 rebuilds the data pipeline from the original Olist source files rather than using the cleaned Stage 1 dataset as the primary source.
@@ -663,13 +663,13 @@ Navigation and date filtering are available throughout the report.
 Project/
 |
 |-- Stage 1/
-|   |-- stage1_new.ipynb
+|   |-- stage1.ipynb
 |   |-- olist_cleaned_dataset_ground_truth.csv
 |   |-- olist_rfm_segmentation.csv
 |   `-- Brazilian_Ecomerce_report_final.html
 |
 |-- Stage 2/
-|   |-- stage2_new.ipynb
+|   |-- stage2.ipynb
 |   |
 |   |-- sql/
 |   |   |-- stage_create.sql
@@ -709,7 +709,7 @@ Download the Brazilian E-Commerce Public Dataset by Olist and place the required
 Execute:
 
 ```text
-stage1_new.ipynb
+stage1.ipynb
 ```
 
 This produces the cleaned reference dataset, Sweetviz report and RFM segmentation.
@@ -719,7 +719,7 @@ This produces the cleaned reference dataset, Sweetviz report and RFM segmentatio
 Execute:
 
 ```text
-stage2_new.ipynb
+stage2.ipynb
 ```
 
 This creates:
