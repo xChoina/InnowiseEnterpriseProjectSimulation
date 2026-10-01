@@ -595,6 +595,15 @@ The Stage 3 notebook defines:
 
 These are documented business / technical requirements for the BI solution. The local project workflow still uses manual SQL execution and manual refresh where required.
 
+
+### Dynamic Row-Level Security
+
+Power BI uses Dynamic RLS based on `mart.dim_security`.
+
+The table maps users to allowed Brazilian states. `USERPRINCIPALNAME()` or `USERNAME()` identifies the logged-in user, and the security filter is propagated through the model to `mart.fact_sales`.
+
+This allows one Power BI report and one dynamic role to serve multiple Regional Managers, while access can be managed by updating the security table instead of creating separate reports or roles.
+
 ---
 
 ## Power BI report
