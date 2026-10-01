@@ -34,6 +34,9 @@ PostgreSQL
 Stage -> Core -> Mart
         |
         v
+Stage 3 requirements / BRD
+        |
+        v
 Power BI
 ```
 
@@ -50,7 +53,7 @@ Architecture diagrams are included with the Stage 2 files:
 Main file:
 
 ```text
-stage1.ipynb
+stage1_new.ipynb
 ```
 
 ## Source files
@@ -382,13 +385,25 @@ mart.dim_date
 
 ```text
 stage_create.sql
+data_to_stage.sql
 core_create.sql
 data_to_core.sql
 mart_create.sql
-core_to_mart.sql
+data_to_mart.sql
 reset_stage.sql
-elt_delta_scd1_scd2.sql
+delta_load.sql
 ```
+
+The SQL files are intentionally separated by responsibility:
+
+- `stage_create.sql` — creates the Stage schemas and Stage tables.
+- `data_to_stage.sql` — loads the initial dataset and the RFM segmentation into Stage.
+- `core_create.sql` — creates the normalized Core tables.
+- `data_to_core.sql` — loads the initial Stage data into Core.
+- `mart_create.sql` — creates the reporting Star Schema.
+- `data_to_mart.sql` — loads / refreshes Mart dimensions and the fact table from Core.
+- `reset_stage.sql` — clears `stage.raw_orders` and loads the simulated delta batch.
+- `delta_load.sql` — applies the incremental-load, deduplication, SCD Type 1 and SCD Type 2 logic to Core.
 
 ## Initial load order
 
@@ -396,56 +411,76 @@ Run the SQL scripts manually in the following order:
 
 ```text
 1. stage_create.sql
-2. core_create.sql
-3. data_to_core.sql
-4. mart_create.sql
-5. core_to_mart.sql
+2. data_to_stage.sql
+3. core_create.sql
+4. data_to_core.sql
+5. mart_create.sql
+6. data_to_mart.sql
 ```
 
-`stage_create.sql` creates the schemas / Stage tables and loads:
+`data_to_stage.sql` loads:
 
 ```text
 /initial_load.csv
 /olist_rfm_segmentation.csv
 ```
 
+At the end of the initial process, the historical dataset is available in:
+
+```text
+Stage -> Core -> Mart
+```
+
 ---
 
 ## Delta load order
 
-After the initial load has been completed:
+After the initial load has been completed, run:
 
 ```text
 1. reset_stage.sql
-2. elt_delta_scd1_scd2.sql
-3. core_to_mart.sql
+2. delta_load.sql
+3. data_to_mart.sql
 ```
 
-`reset_stage.sql` performs:
+`reset_stage.sql` replaces the previous Stage batch:
 
 ```sql
 TRUNCATE TABLE stage.raw_orders;
+
+COPY stage.raw_orders
+FROM '/delta_load.csv'
+DELIMITER ','
+CSV HEADER;
 ```
 
-and loads:
+`stage.rfm_temp` is intentionally preserved because the Stage 1 RFM segmentation is reused when the customer dimension is loaded into the Mart.
+
+`delta_load.sql` then processes the delta batch and demonstrates:
+
+- insertion of new records,
+- duplicate handling / idempotency,
+- SCD Type 1 overwrite logic,
+- SCD Type 2 customer-history logic.
+
+Finally:
 
 ```text
-/delta_load.csv
+data_to_mart.sql
 ```
 
-The incremental script then updates the Core layer, handles SCD logic and inserts new records.
-
-Finally, `core_to_mart.sql` propagates the updated warehouse data into the Mart.
+is executed again so the reporting layer receives the updated Core data.
 
 ---
 
+
 # Docker
 
-PostgreSQL runs in Docker.
+PostgreSQL runs inside Docker.
 
-Docker is used only to place the generated CSV files inside the PostgreSQL container. SQL scripts are executed manually in the database client.
+Docker is used only to make the generated CSV files available inside the PostgreSQL container. The SQL scripts themselves are executed manually in the database client.
 
-First check the PostgreSQL container name:
+Check the PostgreSQL container name:
 
 ```bash
 docker ps
@@ -459,7 +494,7 @@ docker cp delta_load.csv <postgres_container>:/delta_load.csv
 docker cp olist_rfm_segmentation.csv <postgres_container>:/olist_rfm_segmentation.csv
 ```
 
-The SQL scripts use these paths:
+The SQL scripts expect the following paths inside the PostgreSQL container:
 
 ```text
 /initial_load.csv
@@ -467,13 +502,104 @@ The SQL scripts use these paths:
 /olist_rfm_segmentation.csv
 ```
 
-Because PostgreSQL `COPY` reads from the database server filesystem, these files must exist inside the PostgreSQL container before the related SQL scripts are executed.
+Because PostgreSQL `COPY` reads files from the database-server filesystem, these CSV files must exist inside the container before the related SQL scripts are executed.
+
+No `docker cp` commands are stored inside the SQL scripts.
 
 ---
 
-# Stage 3 — Power BI
 
-Main file:
+# Stage 3 — BI Development
+
+Stage 3 contains two main deliverables:
+
+```text
+stage3.ipynb
+Innowise_Project_Stage3.pbix
+```
+
+`stage3.ipynb` documents the requirement-gathering process and the Business Requirements Document (BRD), while the `.pbix` file contains the implemented Power BI report.
+
+## Requirement Gathering
+
+The Stage 3 notebook defines five core requirement-gathering principles:
+
+1. Focus on the business problem rather than asking stakeholders which charts they want.
+2. Define the operational expectation and the action users should take after seeing the data.
+3. Prototype the solution before building the final report.
+4. Define the relevant timeframe and reporting frequency.
+5. Prioritize a small set of important KPIs instead of placing every metric on one screen.
+
+The notebook also contains eight stakeholder questions divided between:
+
+- the **Executive Director**, focused on strategic goals, KPIs and decision-making,
+- the **Operations Manager**, focused on operational pain points, daily monitoring and corrective actions.
+
+It also explains why an overloaded dashboard reduces usability and distinguishes a simple metric from an actionable insight.
+
+---
+
+## Business Requirements Document
+
+The BRD defines two main audiences.
+
+### Executive Director
+
+The strategic reporting experience focuses on:
+
+- YoY growth,
+- overall sales performance,
+- geographical / categorical analysis,
+- customer value and segmentation.
+
+### Operations Manager
+
+The operational dashboard focuses on:
+
+- delivery bottlenecks,
+- delayed orders,
+- delivery timelines,
+- anomalies requiring action.
+
+### Stage 3 KPI definitions
+
+The BRD defines the main Stage 3 measures as:
+
+- **Total Revenue** — row-by-row calculation of product sales plus freight,
+- **Market / Regional Share %** — selected branch or regional revenue compared with the overall company total,
+- **YoY Growth** — sales compared with the same period in the previous year,
+- **Delivery SLA metrics** — time differences between order checkpoints used to identify logistics bottlenecks.
+
+This Stage 3 revenue definition is intentionally broader than the Stage 1 analytical revenue definition: Stage 1 uses product `price`, while the Mart also stores `freight_value` and `total_value = price + freight_value`.
+
+### Functional requirements
+
+The BRD defines:
+
+- a **3-page strategic dashboard** for the Director:
+  - KPI Overview,
+  - Map / geographical analysis with drill-down,
+  - RFM segmentation,
+- a **single-page operational dashboard** for the Operations Manager,
+- navigation through interactive buttons / bookmarks,
+- visual highlighting of delayed or anomalous shipments.
+
+### Non-functional and technical requirements
+
+The Stage 3 notebook defines:
+
+- **Row-Level Security (RLS)** restricting Regional Managers to their assigned region,
+- a reporting model based on the Mart Star Schema,
+- a target of daily data refresh,
+- a target report load time below 3 seconds.
+
+These are documented business / technical requirements for the BI solution. The local project workflow still uses manual SQL execution and manual refresh where required.
+
+---
+
+## Power BI report
+
+Main report file:
 
 ```text
 Innowise_Project_Stage3.pbix
@@ -481,13 +607,16 @@ Innowise_Project_Stage3.pbix
 
 Power BI connects to the reporting-ready Mart layer.
 
-The final report contains four main pages.
+The final report contains four main report pages: three strategic pages plus one operational page.
 
 ## KPI Overview
 
 Strategic overview containing:
 
-- KPI cards,
+- Total Revenue,
+- Total Orders,
+- Revenue YoY %,
+- Average Order Value,
 - monthly trend,
 - state-level summary,
 - date filtering,
@@ -499,7 +628,8 @@ Geographical and category analysis containing:
 
 - **Revenue by Location**,
 - **Top 5 Category Revenue**,
-- **Revenue vs Freight Cost**.
+- **Revenue vs Freight Cost**,
+- geographical drill-down through the location hierarchy.
 
 ## RFM
 
@@ -514,12 +644,14 @@ Customer segmentation analysis containing:
 
 Operational delivery monitoring containing:
 
-- delivery KPI cards,
-- **Delivery Bottlenecks by Region**,
+- **Total Delayed Orders**,
+- **Avg Delivery Days**,
+- **Avg Delay Days**,
+- **Delivery Bottlenecks by Region / State**,
 - **Delivery Time Distribution**,
-- **Delayed Orders Trend**.
+- **Delayed Orders Trend** and delayed-order rate.
 
-The report also contains supporting tooltip pages and an `Order_Details` page.
+The report also contains supporting tooltip pages, an `Order_Details` page and a methodology / FAQ view.
 
 Navigation and date filtering are available throughout the report.
 
@@ -541,12 +673,13 @@ Project/
 |   |
 |   |-- sql/
 |   |   |-- stage_create.sql
+|   |   |-- data_to_stage.sql
 |   |   |-- core_create.sql
 |   |   |-- data_to_core.sql
 |   |   |-- mart_create.sql
-|   |   |-- core_to_mart.sql
+|   |   |-- data_to_mart.sql
 |   |   |-- reset_stage.sql
-|   |   `-- elt_delta_scd1_scd2.sql
+|   |   `-- delta_load.sql
 |   |
 |   |-- diagrams/
 |   |   |-- FlowChart.png
@@ -557,6 +690,7 @@ Project/
 |   `-- delta_load.csv
 |
 |-- Stage 3/
+|   |-- stage3.ipynb
 |   `-- Innowise_Project_Stage3.pbix
 |
 `-- README.md
@@ -609,10 +743,11 @@ Run manually:
 
 ```text
 stage_create.sql
+data_to_stage.sql
 core_create.sql
 data_to_core.sql
 mart_create.sql
-core_to_mart.sql
+data_to_mart.sql
 ```
 
 ## 6. Process the simulated incremental load
@@ -621,11 +756,21 @@ Run manually:
 
 ```text
 reset_stage.sql
-elt_delta_scd1_scd2.sql
-core_to_mart.sql
+delta_load.sql
+data_to_mart.sql
 ```
 
-## 7. Open Power BI
+## 7. Review Stage 3 requirements
+
+Open:
+
+```text
+stage3.ipynb
+```
+
+This notebook contains the requirement-gathering principles, stakeholder interview questions, business reflection and BRD used to define the Power BI solution.
+
+## 8. Open Power BI
 
 Open:
 
