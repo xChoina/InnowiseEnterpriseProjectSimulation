@@ -655,12 +655,3 @@ DAX
 ```
 
 ---
-
-# Notes
-
-- The original Olist dataset is historical and anonymized.
-- Stage 1 intentionally contains simulated analytical features such as product cost, profit margin, loyalty status and regional manager assignments.
-- Stage 2 intentionally injects incremental/SCD test cases because the raw dataset does not contain a ready-made dimensional change history.
-- Stage 1 analytical revenue is based on product `price`.
-- The Mart additionally stores `freight_value` and `total_value = price + freight_value`.
-- `mart.fact_sales` is stored at order-item grain, so order-level reporting should use distinct `order_id` where appropriate.
