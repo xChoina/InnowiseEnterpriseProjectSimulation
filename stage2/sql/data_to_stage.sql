@@ -1,4 +1,12 @@
 TRUNCATE TABLE stage.raw_orders;
-COPY stage.raw_orders FROM '/delta_load.csv' DELIMITER ',' CSV HEADER;
+TRUNCATE TABLE stage.rfm_temp;
 
-docker cp "C:\Users\Administrator\code\innowise\project_stage_2\initial_load.csv" olist_postgres:/initial_load.csv
+COPY stage.raw_orders
+FROM '/initial_load.csv'
+DELIMITER ','
+CSV HEADER;
+
+COPY stage.rfm_temp
+FROM '/olist_rfm_segmentation.csv'
+DELIMITER ','
+CSV HEADER;
