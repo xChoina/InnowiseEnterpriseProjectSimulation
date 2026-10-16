@@ -6,8 +6,8 @@ Dataset: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
 The project covers three roles and stages:
 
-- **Stage 1 — Junior Data Analyst:** data cleaning, EDA, feature engineering, customer analytics and RFM segmentation.
-- **Stage 2 — Junior Data Engineer:** incremental-load simulation, PostgreSQL DWH architecture, SCD handling and Star Schema preparation.
+- **Stage 1 — Junior Data Analyst:** data cleaning, profiling, EDA, feature engineering, customer analytics and RFM segmentation.
+- **Stage 2 — Junior Data Engineer:** initial/delta simulation, PostgreSQL DWH architecture, incremental loading, SCD handling and Star Schema preparation.
 - **Stage 3 — BI Developer:** Power BI semantic model and business dashboards for strategic and operational reporting.
 
 ---
@@ -15,36 +15,33 @@ The project covers three roles and stages:
 ## Project Flow
 
 ```text
-Raw Olist CSV files
+Olist Raw CSV files
         |
-        v
-Stage 1 — Python analysis
+        +--------------------------+
+        |                          |
+        v                          v
+Stage 1 — Python analysis      Stage 2 — Python load simulation
+        |                          |
+        +--> Cleaned reference     +--> initial_load.csv
+        |    dataset               +--> delta_load.csv
         |
-        +--> Cleaned ground-truth CSV
-        +--> RFM segmentation CSV
-        |
-        v
-Stage 2 — Initial / Delta simulation
-        |
-        +--> initial_load.csv
-        +--> delta_load.csv
-        |
-        v
-PostgreSQL
-Stage -> Core -> Mart
-        |
-        v
-Stage 3 requirements / BRD
-        |
-        v
-Power BI
+        +--> RFM segmentation ---------> stage.rfm_temp
+                                   |
+                                   v
+                              PostgreSQL
+                         Stage -> Core -> Mart
+                                   |
+                                   v
+                               Power BI
 ```
 
-Architecture diagrams are included with the Stage 2 files:
+Stage 2 is rebuilt from the original Olist source data rather than from the Stage 1 cleaned analytical dataset. The Stage 1 RFM output is reused separately as customer-segmentation enrichment in the Mart.
 
-- `FlowChart.png`
-- `Core_erd.png`
-- `Mart_erd.png`
+Architecture diagrams are stored with the Stage 2 files:
+
+- `flowchart_olist.png`
+- `CORE_ERD_DIAG.png`
+- `MART_ERD_DIAG.png`
 
 ---
 
@@ -66,22 +63,23 @@ olist_orders_dataset.csv
 olist_customers_dataset.csv
 olist_products_dataset.csv
 product_category_name_translation.csv
-olist_geolocation_dataset.csv
 ```
 
-The main analytical dataset is created by merging order items, orders, customers, products and translated product categories.
+The main analytical dataset is built with left merges of order items, orders, customers, products and the product-category translation table.
 
-## Data preparation
+The analysis runs on the full merged dataset; no artificial 10,000-row sample is applied before cleaning.
 
-The notebook performs data cleaning and preparation including:
+## Data preparation and feature engineering
 
-- standardizing column names,
-- duplicate checks and removal,
+The notebook performs:
+
+- standardized column naming,
+- duplicate detection and removal,
 - datetime conversion,
-- filtering to delivered orders with positive product weight,
-- handling missing product categories,
+- filtering to `order_status == 'delivered'` and `product_weight_g > 0`,
+- filling missing translated product categories with `Unknown`,
 - customer-city standardization,
-- categorical feature engineering.
+- categorical and time-based feature engineering.
 
 Created analytical features include:
 
@@ -89,43 +87,17 @@ Created analytical features include:
 - `purchase_day_of_week`,
 - `category_keyword`,
 - department grouping,
-- regional manager mapping.
+- `regional_manager` mapping.
 
-## Simulated analytical fields
+### Simulated analytical fields
 
-Some fields are intentionally created for analytical exercises and do not come from the original Olist source data.
+Some business attributes do not exist in the original Olist dataset and are generated only for analytical exercises:
 
-### Product cost and margin
+- `product_cost` and `profit_margin` are simulated from a reproducible random cost multiplier (`np.random.seed(24)`),
+- `loyalty_status` is simulated as `Standard` / `Premium`,
+- `regional_manager` is assigned from customer state for hierarchical analysis.
 
-A reproducible random cost multiplier is generated with:
-
-```python
-np.random.seed(24)
-```
-
-and used to create:
-
-```text
-product_cost
-profit_margin
-```
-
-### Loyalty status
-
-A simulated loyalty attribute is created for a subset of customers:
-
-```text
-Standard
-Premium
-```
-
-with Premium status applied after `2018-01-01` for the selected customers.
-
-### Regional managers
-
-Brazilian states are mapped to supplementary regional managers for hierarchical analysis.
-
----
+These fields are illustrative only. In particular, simulated product cost and profit margin are **not** treated as real financial KPIs and are not propagated into the production Mart.
 
 ## Automated profiling
 
@@ -137,32 +109,47 @@ Generated report:
 Brazilian_Ecomerce_report_final.html
 ```
 
----
+## Technical function coverage
+
+Stage 1 explicitly demonstrates the required pandas / NumPy functionality, including:
+
+```text
+groupby / agg / nunique / transform
+pivot_table / melt
+merge / map
+np.where
+pd.qcut / pd.cut
+pct_change / rolling / nlargest
+query
+.dt / .str
+apply
+```
+
+Examples include a pivoted department comparison, melted rolling time-series data, `np.where()` for simulated loyalty status, `pct_change()` for monthly revenue dynamics and `pd.cut()` for frequency scoring.
 
 ## Exploratory Data Analysis
-
-Stage 1 contains static and interactive analysis.
 
 ### Static analysis
 
 The notebook includes:
 
-- smoothed revenue and freight trends using a 7-day rolling average,
-- freight-value distribution with a boxplot,
-- Revenue vs Freight Cost comparison by department.
+- a 7-day rolling trend for product revenue and freight value,
+- freight-value distribution for the Top 5 states,
+- Revenue vs Freight Cost comparison by department using `pivot_table`,
+- an illustrative simulated profit-margin analysis with an explicit limitation note.
 
 ### Interactive analysis
 
 Plotly is used for:
 
-- geographical analysis of revenue and freight value by Brazilian state,
-- hierarchical drill-down:
+- geographical analysis by Brazilian state,
+- hierarchical analysis through:
 
 ```text
 Regional Manager -> State -> Main Department
 ```
 
----
+The hierarchy is used to identify operationally problematic category/region combinations, with the notebook highlighting Home & Living in the North-region manager group as the main example based on freight behavior.
 
 ## Customer analytics
 
@@ -174,40 +161,60 @@ The notebook calculates:
 - total orders,
 - unique customers,
 - Average Order Value (AOV),
-- Average Revenue Per User (ARPU).
+- Average Revenue Per User (ARPU),
+- month-over-month revenue percentage change.
 
-Stage 1 revenue calculations use the `price` field.
+**Stage 1 revenue is defined as the sum of product `price` only.** Freight is analyzed separately.
 
 ### Cohort analysis
 
-Customers are assigned to cohorts based on the month of their first purchase.
+Customers are assigned to cohorts based on the month of their first purchase using `transform('min')`.
 
-A retention matrix is created using:
+The retention matrix uses:
 
 ```text
 cohort_month
 cohort_index
 ```
 
+The notebook identifies a strong post-purchase drop-off, with Month 1 retention typically around 0.1%–0.3% in this cleaned analytical population.
+
 ### RFM segmentation
 
-RFM is calculated for each `customer_unique_id`:
+RFM is calculated at `customer_unique_id` level:
 
-- **Recency** — days since the latest purchase,
-- **Frequency** — number of unique orders,
+- **Recency** — days since the customer's latest purchase relative to one day after the latest dataset purchase date,
+- **Frequency** — number of unique `order_id`,
 - **Monetary** — sum of product `price`.
 
-Quantile-based R, F and M scores are created and customers are assigned to:
+Scoring uses:
+
+- `pd.qcut()` for Recency,
+- `pd.qcut()` for Monetary,
+- `pd.cut()` for Frequency with order-count boundaries `1`, `2`, `3`, `4+`.
+
+Customers are assigned to:
 
 ```text
 Champion
 At risk
+Sleeping
+Newbies
 Regulars
 ```
 
-The notebook also displays the Top 5 customers in each segment.
+Final segment counts from the notebook:
 
----
+```text
+Regulars    46,849
+Sleeping    22,721
+Newbies     22,607
+At risk      1,026
+Champion       136
+Total       93,339
+```
+
+The notebook also displays the Top 5 customers by Monetary value in each segment.
 
 ## Stage 1 outputs
 
@@ -217,9 +224,9 @@ olist_rfm_segmentation.csv
 Brazilian_Ecomerce_report_final.html
 ```
 
-The cleaned dataset acts as a reference output for later pipeline validation.
+The cleaned dataset is a reference / ground-truth analytical output. It is **not** the main Stage 2 pipeline source.
 
-The RFM result is loaded into the Stage layer in Stage 2 and later enriches the customer dimension in the Mart.
+`olist_rfm_segmentation.csv` is loaded into `stage.rfm_temp` and later enriches the current customer version in `mart.dim_customer`.
 
 ---
 
@@ -231,22 +238,25 @@ Main file:
 stage2.ipynb
 ```
 
-Stage 2 rebuilds the data pipeline from the original Olist source files rather than using the cleaned Stage 1 dataset as the primary source.
+Stage 2 simulates a production-style incremental pipeline from the original Olist transactional data.
 
 ## Initial and Delta simulation
 
-The source data is sorted by `order_purchase_timestamp` and split into:
+The dataset is sorted by `order_purchase_timestamp` and split chronologically into:
 
 ```text
 90% -> initial_load.csv
-10% -> delta batch
+10% -> natural later-order delta
 ```
 
-The final delta dataset also contains intentionally injected test cases:
+The delta is then enriched with controlled test cases for the required loading scenarios:
 
-- SCD Type 1 case,
-- SCD Type 2 case,
-- duplicated rows.
+- **new records** — naturally later records from the 10% chronological delta,
+- **SCD Type 1** — selected existing orders receive an updated `order_status`,
+- **SCD Type 2** — selected existing customers receive changed location attributes,
+- **exact duplicates** — selected initial-load rows are repeated to test idempotency.
+
+No artificial new `order_id` is manufactured for the SCD2 test. Customer history changes are tied to real later order events.
 
 The notebook exports:
 
@@ -262,7 +272,7 @@ delta_load.csv
 The warehouse follows:
 
 ```text
-Stage -> Core -> Mart
+Source -> Stage -> Core -> Mart -> Power BI
 ```
 
 ## Stage layer
@@ -274,78 +284,110 @@ stage.raw_orders
 stage.rfm_temp
 ```
 
-`stage.raw_orders` contains the current load batch.
+`stage.raw_orders` is a flat landing table representing the current load batch. Keeping the Stage layer flat minimizes transformation at ingestion and preserves the source batch before normalization.
 
-`stage.rfm_temp` stores the RFM segmentation created in Stage 1.
+`stage.rfm_temp` stores the Stage 1 RFM result and is intentionally preserved when `stage.raw_orders` is reset for the delta batch.
 
-## Core layer
+## Core layer — 3NF
 
-The Core layer contains:
+Core tables:
 
 ```text
 core.customers
 core.orders
 core.order_items
 core.products
+core.product_categories
 core.sellers
 ```
 
-The Core model is normalized and keeps customer history.
+The Core layer separates transactional entities and product category translation instead of keeping the flat Stage structure.
 
-### SCD Type 2
+### Customer SCD Type 2
 
 `core.customers` contains:
 
 ```text
 customer_sk
 customer_unique_id
+customer_zip_code_prefix
+customer_city
+customer_state
 valid_from
 valid_to
 is_current
 ```
 
-`customer_sk` is the surrogate primary key.
-
-Changes in customer location attributes are versioned using SCD Type 2 logic:
+`customer_sk` is the surrogate primary key. Location changes in:
 
 ```text
+customer_zip_code_prefix
 customer_city
 customer_state
-customer_zip_code_prefix
 ```
 
-The old record is expired and a new current customer version is inserted.
+create new SCD Type 2 versions.
 
-### SCD Type 1 / overwrite logic
-
-The incremental SQL uses `ON CONFLICT ... DO UPDATE` for attributes that should be overwritten with their latest value, including selected product and order attributes.
-
-### Deduplication / idempotency
-
-Natural transaction keys and database constraints are used to prevent duplicate inserts.
-
-Examples:
+The validity interval uses a half-open temporal model:
 
 ```text
-orders      -> order_id
-order_items -> order_id + order_item_id
-products    -> product_id
-sellers     -> seller_id
+valid_from <= order_purchase_timestamp < valid_to
 ```
+
+The final current version ends at:
+
+```text
+9999-12-31 23:59:59
+```
+
+A partial unique index ensures only one current version exists for each `customer_unique_id`.
+
+`core.orders` keeps `customer_unique_id` rather than a physical foreign key to one customer version. The correct `customer_sk` is resolved later by the temporal join when the fact table is loaded.
+
+### SCD Type 1
+
+The incremental load applies `ON CONFLICT ... DO UPDATE` where the latest value should overwrite the existing value.
+
+Examples include:
+
+- order status / order milestone timestamps,
+- product attributes,
+- product-category translation.
+
+Updates use `IS DISTINCT FROM` where relevant so unchanged records are not rewritten unnecessarily.
+
+### Deduplication and idempotency
+
+Natural transaction keys and database constraints prevent duplicate insertion:
+
+```text
+orders             -> order_id
+order_items        -> order_id + order_item_id
+products           -> product_id
+product_categories -> product_category_name
+sellers            -> seller_id
+customer version   -> customer_unique_id + valid_from
+```
+
+Exact duplicate rows in the delta therefore do not create duplicate Core transactions.
 
 ---
 
-## Mart layer
+## Mart layer — Star Schema
 
-The reporting layer uses a Star Schema.
-
-### Fact table
+The reporting layer contains:
 
 ```text
 mart.fact_sales
+mart.dim_customer
+mart.dim_product
+mart.dim_seller
+mart.dim_date
 ```
 
-Grain:
+### Fact table
+
+`mart.fact_sales` grain:
 
 ```text
 one row per order_id + order_item_id
@@ -353,31 +395,100 @@ one row per order_id + order_item_id
 
 The fact contains:
 
-- customer surrogate key,
-- product,
-- seller,
-- order / approval / delivery date keys,
+- `customer_sk`,
+- `product_id`,
+- `seller_id`,
+- five date keys,
 - order status,
-- price,
-- freight value,
-- `total_value`.
+- `price`,
+- `freight_value`,
+- `total_value`,
+- `delivery_days`,
+- `delay_days`,
+- `delayed_flag`.
 
-In SQL:
+Financial definition in the Mart:
 
 ```text
 total_value = price + freight_value
 ```
 
-### Dimensions
+Operational delivery fields are calculated in SQL:
 
 ```text
-mart.dim_customer
-mart.dim_product
-mart.dim_seller
-mart.dim_date
+delivery_days = actual customer delivery date - purchase date
+
+delay_days = actual customer delivery date - estimated delivery date
+
+delayed_flag = 1 when actual delivery date > estimated delivery date
+               0 when the order is on time
+               NULL when the comparison cannot be evaluated
 ```
 
-`mart.dim_customer` is additionally enriched with the Stage 1 RFM metrics and segment.
+No synthetic margin is stored in the Mart because the original Olist source does not contain an actual product-cost field.
+
+### Temporal customer lookup
+
+The fact loader resolves the correct SCD2 customer version with:
+
+```text
+customer_unique_id
+AND order_purchase_timestamp >= valid_from
+AND order_purchase_timestamp < valid_to
+```
+
+The load uses a temporal `LEFT JOIN` and then explicitly raises an exception if any fact row has no valid `customer_sk`. This prevents silent row loss caused by an `INNER JOIN` and makes temporal data-quality issues visible.
+
+### Customer dimension
+
+`mart.dim_customer` preserves the SCD2 fields and adds:
+
+```text
+customer_region
+recency
+frequency
+monetary
+r_score
+f_score
+m_score
+segment
+```
+
+RFM values are populated only on the **current SCD2 customer version**. Historical versions retain their location history without duplicating a stale RFM snapshot.
+
+Brazilian states are grouped into:
+
+```text
+North
+Northeast
+Central-West
+Southeast
+South
+```
+
+### Date dimension
+
+`mart.dim_date` contains one row per calendar date and is enriched with:
+
+```text
+date_id
+full_date
+year
+quarter
+month
+month_name
+year_month
+day
+day_of_week
+```
+
+The SQL generates the calendar from `2016-01-01` through `2025-12-31`.
+
+### Mart idempotency
+
+Dimension and fact loads use `ON CONFLICT` logic so `data_to_mart.sql` can be rerun after the initial or delta Core load.
+
+For existing fact rows, only mutable reporting attributes are updated. The historical `customer_sk` is not repointed during the fact upsert.
 
 ---
 
@@ -394,20 +505,20 @@ reset_stage.sql
 delta_load.sql
 ```
 
-The SQL files are intentionally separated by responsibility:
+Responsibilities:
 
-- `stage_create.sql` — creates the Stage schemas and Stage tables.
-- `data_to_stage.sql` — loads the initial dataset and the RFM segmentation into Stage.
-- `core_create.sql` — creates the normalized Core tables.
-- `data_to_core.sql` — loads the initial Stage data into Core.
+- `stage_create.sql` — creates Stage, Core and Mart schemas plus Stage tables.
+- `data_to_stage.sql` — truncates and loads the initial batch and RFM segmentation into Stage.
+- `core_create.sql` — creates the normalized Core model, constraints and indexes.
+- `data_to_core.sql` — performs the initial Stage-to-Core load and builds initial SCD2 history.
 - `mart_create.sql` — creates the reporting Star Schema.
-- `data_to_mart.sql` — loads / refreshes Mart dimensions and the fact table from Core.
-- `reset_stage.sql` — clears `stage.raw_orders` and loads the simulated delta batch.
-- `delta_load.sql` — applies the incremental-load, deduplication, SCD Type 1 and SCD Type 2 logic to Core.
+- `data_to_mart.sql` — loads / upserts dimensions and fact data, resolves the temporal customer key and calculates delivery fields.
+- `reset_stage.sql` — truncates only `stage.raw_orders` and loads `delta_load.csv`; `stage.rfm_temp` is retained.
+- `delta_load.sql` — performs the incremental Core load, including new records, SCD1, SCD2 and duplicate-safe processing.
 
 ## Initial load order
 
-Run the SQL scripts manually in the following order:
+Run manually in this order:
 
 ```text
 1. stage_create.sql
@@ -425,17 +536,9 @@ Run the SQL scripts manually in the following order:
 /olist_rfm_segmentation.csv
 ```
 
-At the end of the initial process, the historical dataset is available in:
-
-```text
-Stage -> Core -> Mart
-```
-
----
-
 ## Delta load order
 
-After the initial load has been completed, run:
+After the initial load:
 
 ```text
 1. reset_stage.sql
@@ -443,7 +546,7 @@ After the initial load has been completed, run:
 3. data_to_mart.sql
 ```
 
-`reset_stage.sql` replaces the previous Stage batch:
+`reset_stage.sql` replaces only the current raw Stage batch:
 
 ```sql
 TRUNCATE TABLE stage.raw_orders;
@@ -454,31 +557,17 @@ DELIMITER ','
 CSV HEADER;
 ```
 
-`stage.rfm_temp` is intentionally preserved because the Stage 1 RFM segmentation is reused when the customer dimension is loaded into the Mart.
+`stage.rfm_temp` remains available for customer enrichment.
 
-`delta_load.sql` then processes the delta batch and demonstrates:
-
-- insertion of new records,
-- duplicate handling / idempotency,
-- SCD Type 1 overwrite logic,
-- SCD Type 2 customer-history logic.
-
-Finally:
-
-```text
-data_to_mart.sql
-```
-
-is executed again so the reporting layer receives the updated Core data.
+Re-running the same delta is designed not to create duplicate transaction rows or duplicate customer versions.
 
 ---
-
 
 # Docker
 
 PostgreSQL runs inside Docker.
 
-Docker is used only to make the generated CSV files available inside the PostgreSQL container. The SQL scripts themselves are executed manually in the database client.
+Docker is used only to make generated CSV files available on the PostgreSQL server filesystem. SQL scripts are executed manually in the database client.
 
 Check the PostgreSQL container name:
 
@@ -494,7 +583,7 @@ docker cp delta_load.csv <postgres_container>:/delta_load.csv
 docker cp olist_rfm_segmentation.csv <postgres_container>:/olist_rfm_segmentation.csv
 ```
 
-The SQL scripts expect the following paths inside the PostgreSQL container:
+The SQL scripts expect:
 
 ```text
 /initial_load.csv
@@ -502,12 +591,11 @@ The SQL scripts expect the following paths inside the PostgreSQL container:
 /olist_rfm_segmentation.csv
 ```
 
-Because PostgreSQL `COPY` reads files from the database-server filesystem, these CSV files must exist inside the container before the related SQL scripts are executed.
+Because PostgreSQL `COPY` reads from the database-server filesystem, the CSV files must exist inside the container before the related SQL scripts are executed.
 
 No `docker cp` commands are stored inside the SQL scripts.
 
 ---
-
 
 # Stage 3 — BI Development
 
@@ -594,7 +682,6 @@ The Stage 3 notebook defines:
 - a target report load time below 3 seconds.
 
 These are documented business / technical requirements for the BI solution. The local project workflow still uses manual SQL execution and manual refresh where required.
-
 
 ### Dynamic Row-Level Security
 
@@ -691,9 +778,9 @@ Project/
 |   |   `-- delta_load.sql
 |   |
 |   |-- diagrams/
-|   |   |-- FlowChart.png
-|   |   |-- Core_erd.png
-|   |   `-- Mart_erd.png
+|   |   |-- flowchart_olist.png
+|   |   |-- CORE_ERD_DIAG.png
+|   |   `-- MART_ERD_DIAG.png
 |   |
 |   |-- initial_load.csv
 |   `-- delta_load.csv
