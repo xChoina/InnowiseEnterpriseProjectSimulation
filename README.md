@@ -4,6 +4,8 @@ End-to-end analytics project based on the **Brazilian E-Commerce Public Dataset 
 
 Dataset: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
+Some project files exceed GitHub's file size limits and are available in Google Drive: https://drive.google.com/drive/folders/17D5ruFOP2abx_2WDHfSYO2Ie8TYE5-0n?usp=sharing
+
 The project covers three roles and stages:
 
 - **Stage 1 — Junior Data Analyst:** data cleaning, profiling, EDA, feature engineering, customer analytics and RFM segmentation.
