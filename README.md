@@ -599,101 +599,210 @@ No `docker cp` commands are stored inside the SQL scripts.
 
 # Stage 3 — BI Development
 
-Stage 3 contains two main deliverables:
+Stage 3 delivers the Power BI semantic model, strategic and operational dashboards, documented BI requirements, low-fidelity wireframes, data storytelling and SQL-to-Power-BI validation evidence.
+
+Main files:
 
 ```text
 stage3.ipynb
 Innowise_Project_Stage3.pbix
 ```
 
-`stage3.ipynb` documents the requirement-gathering process and the Business Requirements Document (BRD), while the `.pbix` file contains the implemented Power BI report.
+Supporting Stage 3 evidence:
+
+```text
+Dashboard1.png          # Director — KPI Overview wireframe
+Dashboard2.png          # Director — Map / Drill-down wireframe
+Dashboard3.png          # Director — RFM Segmentation wireframe
+Dashboard4.png          # Operations Manager wireframe
+RevenueSQL.png          # Total Revenue validation
+TotalOrdersSQL.png      # Total Orders validation
+DelayedOrdersSQL.png    # Total Delayed Orders validation
+```
+
+`stage3.ipynb` contains requirement gathering, the Business Requirements Document (BRD), wireframing notes, data storytelling and validation documentation. The `.pbix` file contains the implemented Power BI report.
 
 ## Requirement Gathering
 
-The Stage 3 notebook defines five core requirement-gathering principles:
+The notebook defines five requirement-gathering principles:
 
-1. Focus on the business problem rather than asking stakeholders which charts they want.
-2. Define the operational expectation and the action users should take after seeing the data.
+1. Focus on the business problem rather than starting from chart selection.
+2. Define the operational expectation and the action that should follow from the data.
 3. Prototype the solution before building the final report.
 4. Define the relevant timeframe and reporting frequency.
-5. Prioritize a small set of important KPIs instead of placing every metric on one screen.
+5. Prioritize a small set of important KPIs instead of overcrowding one page.
 
-The notebook also contains eight stakeholder questions divided between:
+Eight stakeholder questions are split between:
 
 - the **Executive Director**, focused on strategic goals, KPIs and decision-making,
-- the **Operations Manager**, focused on operational pain points, daily monitoring and corrective actions.
+- the **Operations Manager**, focused on daily monitoring, operational pain points and corrective actions.
 
-It also explains why an overloaded dashboard reduces usability and distinguishes a simple metric from an actionable insight.
+The notebook also explains why placing all metrics on one screen reduces usability and distinguishes a simple metric from an actionable insight.
 
 ---
 
 ## Business Requirements Document
 
-The BRD defines two main audiences.
+The BI solution provides two complementary reporting experiences.
 
 ### Executive Director
 
-The strategic reporting experience focuses on:
+The strategic dashboard is designed to monitor:
 
-- YoY growth,
 - overall sales performance,
-- geographical / categorical analysis,
-- customer value and segmentation.
+- revenue growth and YoY change,
+- geographical performance,
+- product-category performance,
+- customer value and RFM segmentation.
 
 ### Operations Manager
 
-The operational dashboard focuses on:
+The operational dashboard is designed to monitor:
 
-- delivery bottlenecks,
 - delayed orders,
-- delivery timelines,
-- anomalies requiring action.
+- delivery bottlenecks,
+- delivery-time distribution,
+- delay severity,
+- states requiring operational intervention.
 
-### Stage 3 KPI definitions
+### Key metrics and definitions
 
-The BRD defines the main Stage 3 measures as:
+The main Stage 3 metrics include:
 
-- **Total Revenue** — row-by-row calculation of product sales plus freight,
-- **Market / Regional Share %** — selected branch or regional revenue compared with the overall company total,
-- **YoY Growth** — sales compared with the same period in the previous year,
-- **Delivery SLA metrics** — time differences between order checkpoints used to identify logistics bottlenecks.
+- **Total Revenue** — total customer charge including product price and freight.
 
-This Stage 3 revenue definition is intentionally broader than the Stage 1 analytical revenue definition: Stage 1 uses product `price`, while the Mart also stores `freight_value` and `total_value = price + freight_value`.
+```text
+Total Revenue = SUMX(fact_sales, price + freight_value)
+```
 
-### Functional requirements
+- **Total Orders** — unique number of orders.
 
-The BRD defines:
+```text
+Total Orders = DISTINCTCOUNT(fact_sales[order_id])
+```
 
-- a **3-page strategic dashboard** for the Director:
-  - KPI Overview,
-  - Map / geographical analysis with drill-down,
-  - RFM segmentation,
-- a **single-page operational dashboard** for the Operations Manager,
-- navigation through interactive buttons / bookmarks,
-- visual highlighting of delayed or anomalous shipments.
+- **Average Order Value (AOV)** — revenue per unique order.
 
-### Non-functional and technical requirements
+```text
+AOV = Total Revenue / Total Orders
+```
 
-The Stage 3 notebook defines:
+- **Revenue Last Year** — revenue for the equivalent period in the previous year.
 
-- **Row-Level Security (RLS)** restricting Regional Managers to their assigned region,
-- a reporting model based on the Mart Star Schema,
-- a target of daily data refresh,
-- a target report load time below 3 seconds.
+```DAX
+Revenue Last Year =
+CALCULATE(
+    [Total Revenue],
+    SAMEPERIODLASTYEAR(dim_date[full_date])
+)
+```
 
-These are documented business / technical requirements for the BI solution. The local project workflow still uses manual SQL execution and manual refresh where required.
+- **Revenue YoY %** — percentage change against the equivalent period in the previous year.
+
+```text
+Revenue YoY % = (Total Revenue - Revenue Last Year) / Revenue Last Year
+```
+
+- **Total Customers** — unique customers in the current filter context.
+- **Orders per Customer** — Total Orders / Total Customers.
+- **Revenue per Customer** — Total Revenue / Total Customers.
+- **Average Freight** — average `freight_value`.
+- **Total Delayed Orders** — unique orders where `delayed_flag = 1`.
+- **Average Delivery Days** — average delivery duration calculated once per order.
+- **Average Delay Days** — average number of days past the estimated delivery date for delayed orders.
+- **Delayed Order Rate %** — delayed orders divided by SLA-eligible orders.
+- **% On-Time Delivery** — on-time orders divided by SLA-eligible orders.
+- **Regional Revenue Share %** — selected geographical revenue divided by the total revenue available within the user's authorized RLS scope.
+
+### Delivery SLA definition
+
+An order is:
+
+- **On-Time** when actual delivery date <= estimated delivery date,
+- **Delayed** when actual delivery date > estimated delivery date,
+- **SLA-eligible** only when both actual and estimated delivery dates are available.
+
+```text
+delivery_days = actual delivery date - order purchase date
+
+delay_days = actual delivery date - estimated delivery date
+```
+
+### RFM segmentation
+
+RFM is calculated at `customer_unique_id` level using:
+
+- **Recency** — days since the latest purchase,
+- **Frequency** — number of unique orders,
+- **Monetary** — total product value purchased.
+
+Customer segments:
+
+```text
+Champion
+At risk
+Newbies
+Regulars
+Sleeping
+```
+
+---
+
+## Functional Requirements
+
+The report contains four main business pages.
+
+### Strategic dashboard — Executive Director
+
+1. **KPI Overview**
+2. **Map / Geographical Analysis**
+3. **RFM Segmentation**
+
+### Operational dashboard — Operations Manager
+
+4. **Operations**
+
+The report also contains supporting tooltip pages, an `Order_Details` drill-through page and methodology / FAQ content. Supporting pages are not counted as main dashboard pages.
+
+The strategic experience supports navigation through interactive buttons and bookmarks. The Map page provides State -> City drill-down and a state-level fallback visual if map visuals are unavailable.
+
+The Operations page shows delivery-time distribution, delivery bottlenecks, delayed-order trends and visually highlights delayed or anomalous records.
+
+---
+
+## Non-Functional & Technical Requirements
 
 ### Dynamic Row-Level Security
 
 Power BI uses Dynamic RLS based on `mart.dim_security`.
 
-The table maps users to allowed Brazilian states. `USERPRINCIPALNAME()` or `USERNAME()` identifies the logged-in user, and the security filter is propagated through the model to `mart.fact_sales`.
+- Regional / Operations Managers are restricted to their assigned Brazilian state or states through `customer_state`.
+- The logged-in user is identified with `USERPRINCIPALNAME()`.
+- The Executive Director has unrestricted access to all states.
+- Security is applied through the data model rather than being embedded inside revenue measures.
 
-This allows one Power BI report and one dynamic role to serve multiple Regional Managers, while access can be managed by updating the security table instead of creating separate reports or roles.
+### Advanced DAX
+
+The report includes the required advanced DAX patterns:
+
+- `SUMX` for row-by-row Total Revenue calculation,
+- `REMOVEFILTERS` for revenue-share / total-context calculations while respecting RLS,
+- `SAMEPERIODLASTYEAR` for previous-year comparison,
+- time intelligence through the active order-date relationship with `mart.dim_date`.
+
+The date dimension is marked as the model's Date Table.
+
+### Data model and performance
+
+Power BI uses the Mart Star Schema as the reporting semantic model.
+
+Target refresh frequency is daily; in the local project environment, SQL and Power BI refreshes can be executed manually.
+
+The model uses an optimized star-schema structure and reusable DAX measures, with a target page load time below 3 seconds.
 
 ---
 
-## Power BI report
+## Power BI Report
 
 Main report file:
 
@@ -703,9 +812,7 @@ Innowise_Project_Stage3.pbix
 
 Power BI connects to the reporting-ready Mart layer.
 
-The final report contains four main report pages: three strategic pages plus one operational page.
-
-## KPI Overview
+### KPI Overview
 
 Strategic overview containing:
 
@@ -713,43 +820,150 @@ Strategic overview containing:
 - Total Orders,
 - Revenue YoY %,
 - Average Order Value,
-- monthly trend,
-- state-level summary,
+- Monthly Trend,
+- state-level summary with conditional data bars,
 - date filtering,
-- metric navigation / selection.
+- metric selection.
 
-## Map
+### Map
 
-Geographical and category analysis containing:
+Geographical and categorical analysis containing:
 
-- **Revenue by Location**,
+- **Selected Metric by Location** with State -> City drill-down,
 - **Top 5 Category Revenue**,
-- **Revenue vs Freight Cost**,
-- geographical drill-down through the location hierarchy.
+- **Selected Metric by State** fallback visual.
 
-## RFM
+The map is focused on Brazil and the supporting state visual allows analysis even when map visuals are unavailable.
+
+### RFM
 
 Customer segmentation analysis containing:
 
+- Total Customers,
+- AOV,
+- Orders per Customer,
+- Revenue per Customer,
 - **Revenue by RFM Segment**,
-- customer-segment summary,
+- **Revenue per Customer by Segment**,
 - customer distribution by segment,
-- **Revenue per Customer by Segment**.
+- segment-level detail table.
 
-## Operations
+### Operations
 
 Operational delivery monitoring containing:
 
 - **Total Delayed Orders**,
 - **Avg Delivery Days**,
 - **Avg Delay Days**,
+- **Delayed Order Rate %**,
 - **Delivery Bottlenecks by Region / State**,
 - **Delivery Time Distribution**,
-- **Delayed Orders Trend** and delayed-order rate.
+- **Delayed Orders Trend**.
 
-The report also contains supporting tooltip pages, an `Order_Details` page and a methodology / FAQ view.
+The operational page is designed to surface delivery exceptions and geographical bottlenecks for day-to-day action.
 
-Navigation and date filtering are available throughout the report.
+---
+
+## Wireframes
+
+Low-fidelity wireframes were created before the final dashboard implementation for all four main business pages:
+
+```text
+Dashboard1.png — Director dashboard #1: KPI Overview
+Dashboard2.png — Director dashboard #2: Map and Drill Down
+Dashboard3.png — Director dashboard #3: RFM Segmentation
+Dashboard4.png — Operations Manager dashboard
+```
+
+The wireframes define the initial placement of KPI cards, filters, navigation and main/supporting visuals. They intentionally use simple boxes and placeholder labels rather than final styling.
+
+---
+
+## Data Storytelling
+
+Two business patterns were identified from the final report.
+
+### Pattern 1 — Customer value is concentrated in the Regulars segment
+
+The Regulars segment contains the largest number of customers and generates the highest total revenue. Champions represent only a very small part of the customer base but generate substantially higher revenue per customer.
+
+**Hypothesis:** most customers make only a limited number of repeat purchases, while a small group of highly engaged customers generates significantly more value per customer.
+
+**Business action:** focus retention and repeat-purchase campaigns on high-value Regulars and At-risk customers. Converting even a small share of these customers into Champions could increase customer lifetime value without relying only on new customer acquisition.
+
+### Pattern 2 — Delivery delays show visible peaks during periods of higher activity
+
+Most deliveries are completed within the 6-10 day delivery-time bucket, while the overall delayed-order rate is approximately **6.77%**. The delayed-order trend shows visible peaks, particularly during late 2017 and early 2018.
+
+**Hypothesis:** periods with higher order activity may put additional pressure on fulfillment and logistics capacity, contributing to more delayed deliveries.
+
+**Business action:** monitor delayed-order rate together with order volume and prepare additional logistics capacity before expected demand peaks. State-level monitoring can then identify locations requiring operational intervention.
+
+---
+
+## SQL vs Power BI Validation
+
+Three aggregated dashboard metrics were independently validated against raw SQL queries executed on the Mart layer. Side-by-side screenshots are included in the Stage 3 deliverables.
+
+### 1. Total Revenue
+
+Power BI result: approximately **R$ 15.74M**  
+SQL result: **15,737,887.53**
+
+```sql
+SELECT
+    ROUND(
+        SUM(COALESCE(price, 0) + COALESCE(freight_value, 0))::numeric,
+        2
+    ) AS total_revenue
+FROM mart.fact_sales
+WHERE order_status <> 'canceled';
+```
+
+Validation screenshot:
+
+```text
+RevenueSQL.png
+```
+
+### 2. Total Orders
+
+Power BI result: **98,208**  
+SQL result: **98,208**
+
+```sql
+SELECT
+    COUNT(DISTINCT order_id) AS total_orders
+FROM mart.fact_sales
+WHERE order_status <> 'canceled';
+```
+
+Validation screenshot:
+
+```text
+TotalOrdersSQL.png
+```
+
+### 3. Total Delayed Orders
+
+Power BI result: **6,534**  
+SQL result: **6,534**
+
+```sql
+SELECT
+    COUNT(DISTINCT order_id) AS total_delayed_orders
+FROM mart.fact_sales
+WHERE delayed_flag = 1
+  AND order_status <> 'canceled';
+```
+
+Validation screenshot:
+
+```text
+DelayedOrdersSQL.png
+```
+
+The three validation checks confirm that the selected aggregated Power BI values match the corresponding Mart-level SQL results.
 
 ---
 
@@ -787,7 +1001,14 @@ Project/
 |
 |-- Stage 3/
 |   |-- stage3.ipynb
-|   `-- Innowise_Project_Stage3.pbix
+|   |-- Innowise_Project_Stage3.pbix
+|   |-- Dashboard1.png
+|   |-- Dashboard2.png
+|   |-- Dashboard3.png
+|   |-- Dashboard4.png
+|   |-- RevenueSQL.png
+|   |-- TotalOrdersSQL.png
+|   `-- DelayedOrdersSQL.png
 |
 `-- README.md
 ```
@@ -864,7 +1085,7 @@ Open:
 stage3.ipynb
 ```
 
-This notebook contains the requirement-gathering principles, stakeholder interview questions, business reflection and BRD used to define the Power BI solution.
+This notebook contains the requirement-gathering principles, stakeholder interview questions, BRD, wireframing notes, data storytelling and SQL-vs-Power-BI validation documentation used to define and verify the Power BI solution.
 
 ## 8. Open Power BI
 
