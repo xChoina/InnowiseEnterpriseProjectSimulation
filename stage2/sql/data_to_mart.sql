@@ -1,5 +1,6 @@
 BEGIN;
 
+
 INSERT INTO mart.dim_date (
     date_id,
     full_date,
@@ -17,10 +18,36 @@ SELECT
     EXTRACT(YEAR FROM datum)::INT AS year,
     EXTRACT(QUARTER FROM datum)::INT AS quarter,
     EXTRACT(MONTH FROM datum)::INT AS month,
-    TO_CHAR(datum, 'FMMonth') AS month_name,
+
+    (ARRAY[
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December'
+    ])[EXTRACT(MONTH FROM datum)::INT] AS month_name,
+
     TO_CHAR(datum, 'YYYY-MM') AS year_month,
+
     EXTRACT(DAY FROM datum)::INT AS day,
-    TO_CHAR(datum, 'FMDay') AS day_of_week
+
+    (ARRAY[
+        'Sunday',
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday'
+    ])[EXTRACT(DOW FROM datum)::INT + 1] AS day_of_week
+
 FROM (
     SELECT generate_series(
         '2016-01-01'::DATE,
@@ -35,8 +62,10 @@ ON CONFLICT (date_id) DO NOTHING;
 INSERT INTO mart.dim_seller (
     seller_id
 )
-select seller_id
+SELECT
+    seller_id
 FROM core.sellers
+
 ON CONFLICT (seller_id) DO NOTHING;
 
 
@@ -134,13 +163,33 @@ SELECT
     c.valid_to,
     c.is_current,
 
-    CASE WHEN c.is_current THEN r.recency END,
-    CASE WHEN c.is_current THEN r.frequency END,
-    CASE WHEN c.is_current THEN r.monetary END,
-    CASE WHEN c.is_current THEN r.m_score END,
-    CASE WHEN c.is_current THEN r.r_score END,
-    CASE WHEN c.is_current THEN r.f_score END,
-    CASE WHEN c.is_current THEN r.segment END
+    CASE
+        WHEN c.is_current THEN r.recency
+    END,
+
+    CASE
+        WHEN c.is_current THEN r.frequency
+    END,
+
+    CASE
+        WHEN c.is_current THEN r.monetary
+    END,
+
+    CASE
+        WHEN c.is_current THEN r.m_score
+    END,
+
+    CASE
+        WHEN c.is_current THEN r.r_score
+    END,
+
+    CASE
+        WHEN c.is_current THEN r.f_score
+    END,
+
+    CASE
+        WHEN c.is_current THEN r.segment
+    END
 
 FROM core.customers c
 
@@ -150,7 +199,7 @@ LEFT JOIN stage.rfm_temp r
 
 ON CONFLICT (customer_sk) DO UPDATE SET
     customer_unique_id = EXCLUDED.customer_unique_id,
-    customer_zip_code_prefix =EXCLUDED.customer_zip_code_prefix,
+    customer_zip_code_prefix = EXCLUDED.customer_zip_code_prefix,
     customer_city = EXCLUDED.customer_city,
     customer_state = EXCLUDED.customer_state,
     customer_region = EXCLUDED.customer_region,
@@ -220,6 +269,7 @@ SELECT
     o.order_status,
     oi.price,
     oi.freight_value,
+
     oi.price + oi.freight_value
         AS total_value,
 
@@ -227,14 +277,16 @@ SELECT
         WHEN o.order_delivered_customer_date IS NOT NULL
          AND o.order_purchase_timestamp IS NOT NULL
         THEN
-            o.order_delivered_customer_date::DATE - o.order_purchase_timestamp::DATE
+            o.order_delivered_customer_date::DATE
+            - o.order_purchase_timestamp::DATE
     END AS delivery_days,
 
     CASE
         WHEN o.order_delivered_customer_date IS NOT NULL
          AND o.order_estimated_delivery_date IS NOT NULL
         THEN
-            o.order_delivered_customer_date::DATE - o.order_estimated_delivery_date::DATE
+            o.order_delivered_customer_date::DATE
+            - o.order_estimated_delivery_date::DATE
     END AS delay_days,
 
     CASE
@@ -242,11 +294,12 @@ SELECT
           OR o.order_estimated_delivery_date IS NULL
         THEN NULL
 
-        WHEN o.order_delivered_customer_date::DATE > o.order_estimated_delivery_date::DATE
+        WHEN o.order_delivered_customer_date::DATE
+             > o.order_estimated_delivery_date::DATE
         THEN 1
+
         ELSE 0
     END AS delayed_flag
-
 
 FROM core.order_items oi
 
@@ -254,9 +307,12 @@ JOIN core.orders o
     ON oi.order_id = o.order_id
 
 LEFT JOIN core.customers c
-    ON c.customer_unique_id = o.customer_unique_id
+    ON c.customer_unique_id =
+       o.customer_unique_id
+
    AND o.order_purchase_timestamp >=
        c.valid_from
+
    AND o.order_purchase_timestamp <
        c.valid_to;
 
@@ -320,6 +376,7 @@ SELECT
     delivery_days,
     delay_days,
     delayed_flag
+
 FROM tmp_fact_sales
 
 ON CONFLICT (
