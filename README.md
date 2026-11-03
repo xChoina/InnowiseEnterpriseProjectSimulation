@@ -4,7 +4,7 @@ End-to-end analytics project based on the **Brazilian E-Commerce Public Dataset 
 
 Dataset: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
-Some project files exceed GitHub's file size limits and are available in Google Drive: https://drive.google.com/drive/folders/17D5ruFOP2abx_2WDHfSYO2Ie8TYE5-0n?usp=sharing
+Large project files (including the Power BI deliverable, where uploaded) are shared through the [project's Google Drive folder](https://drive.google.com/drive/folders/17D5ruFOP2abx_2WDHfSYO2Ie8TYE5-0n?usp=sharing). The folder link is a shared project location, not a verified direct link to a specific `.pbix` file.
 
 The project covers three roles and stages:
 
@@ -37,7 +37,7 @@ Stage 1 — Python analysis      Stage 2 — Python load simulation
                                Power BI
 ```
 
-Stage 2 is rebuilt from the original Olist source data rather than from the Stage 1 cleaned analytical dataset. The Stage 1 RFM output is reused separately as customer-segmentation enrichment in the Mart.
+Stage 2 is rebuilt from the original Olist source data rather than from the Stage 1 cleaned analytical dataset. Stage 1 generates two separate analytical outputs: the delivered-order/positive-weight dataset for EDA, and an RFM table calculated independently from eligible purchase records (without a delivery-status or product-weight restriction). The RFM output enriches current customer records in the Mart.
 
 Architecture diagrams are stored with the Stage 2 files:
 
@@ -78,7 +78,7 @@ The notebook performs:
 - standardized column naming,
 - duplicate detection and removal,
 - datetime conversion,
-- filtering to `order_status == 'delivered'` and `product_weight_g > 0`,
+- filtering the **cleaned EDA / ground-truth dataset** to `order_status == 'delivered'` and `product_weight_g > 0` (this filter is **not** used to define RFM eligibility),
 - filling missing translated product categories with `Unknown`,
 - customer-city standardization,
 - categorical and time-based feature engineering.
@@ -183,38 +183,45 @@ The notebook identifies a strong post-purchase drop-off, with Month 1 retention 
 
 ### RFM segmentation
 
-RFM is calculated at `customer_unique_id` level:
+RFM is calculated in a **separate pass over the original merged source data** (`df_raw`), rather than over the delivered-only/positive-weight cleaned EDA dataset. This preserves eligible purchases regardless of whether the order has already been delivered and regardless of product weight.
 
-- **Recency** — days since the customer's latest purchase relative to one day after the latest dataset purchase date,
-- **Frequency** — number of unique `order_id`,
-- **Monetary** — sum of product `price`.
+**RFM eligibility** requires:
 
-Scoring uses:
+- `order_status` in `approved`, `invoiced`, `processing`, `shipped`, `delivered`;
+- non-null `customer_unique_id`, `order_purchase_timestamp`, and product `price`.
 
-- `pd.qcut()` for Recency,
-- `pd.qcut()` for Monetary,
-- `pd.cut()` for Frequency with order-count boundaries `1`, `2`, `3`, `4+`.
+Orders with `canceled`, `unavailable`, or `created` status are not eligible. No `product_weight_g` condition is used for RFM.
 
-Customers are assigned to:
+The metrics are grouped by `customer_unique_id`:
 
-```text
-Champion
-At risk
-Sleeping
-Newbies
-Regulars
-```
+- **Recency** — days between the customer's latest eligible **purchase timestamp** and a snapshot date calculated as `max(eligible order_purchase_timestamp) + 1 day` (not a fixed hard-coded date).
+- **Frequency** — distinct count of `order_id`.
+- **Monetary** — sum of product `price`, excluding freight.
 
-Final segment counts from the notebook:
+RFM Monetary and Stage 1 product-only revenue differ from the Stage 3 reporting definition of revenue, where `total_value = price + freight_value`. This is an intentional metric-definition difference.
 
-```text
-Regulars    46,849
-Sleeping    22,721
-Newbies     22,607
-At risk      1,026
-Champion       136
-Total       93,339
-```
+Scoring uses `pd.qcut()` for Recency and Monetary (four quantiles) and `pd.cut()` for Frequency with order-count groups `1`, `2`, `3`, and `4+`. The original five-segment business rules are retained:
+
+- **Champion** — recent, frequent, high-monetary customers (`r >= 3`, `f >= 3`, `m >= 3`).
+- **Newbies** — most recent recency group, one order (`r = 4`, `f = 1`).
+- **At risk** — low recency, at least two orders and high monetary score (`r <= 2`, `f >= 2`, `m >= 3`).
+- **Sleeping** — oldest recency group with one order (`r = 1`, `f = 1`).
+- **Regulars** — all other eligible customers.
+
+Final RFM customer distribution, verified against the refreshed PostgreSQL Mart:
+
+| Segment | Customers |
+|---|---:|
+| Regulars | 47,681 |
+| Sleeping | 23,137 |
+| Newbies | 22,959 |
+| At risk | 1,063 |
+| Champion | 143 |
+| **Total segmented** | **94,983** |
+
+There are **95,420** distinct customers in the original merged source. **437** do not meet RFM eligibility: **431 canceled-only** and **6 unavailable-only** customers. Their RFM fields and segment remain `NULL`; they do **not** constitute a sixth behavioral segment named `Not Segmented`.
+
+The revised logic segments **1,644 more customers** than the previous delivered-only/positive-weight method (93,339). The revised RFM table is the version exported to `olist_rfm_segmentation.csv` and loaded into `stage.rfm_temp`.
 
 The notebook also displays the Top 5 customers by Monetary value in each segment.
 
@@ -229,6 +236,21 @@ Brazilian_Ecomerce_report_final.html
 The cleaned dataset is a reference / ground-truth analytical output. It is **not** the main Stage 2 pipeline source.
 
 `olist_rfm_segmentation.csv` is loaded into `stage.rfm_temp` and later enriches the current customer version in `mart.dim_customer`.
+
+### Stage 1 Ground Truth vs Stage 2 Pipeline Data
+
+The Stage 1 cleaned ground-truth dataset is not expected to have the same number of rows as the Stage 2 `initial_load.csv` + `delta_load.csv`.
+
+Stage 1 is an analytical dataset and applies additional filtering, including:
+
+- `order_status == 'delivered'`
+- `product_weight_g > 0`
+
+As a result, the Stage 1 ground-truth dataset contains approximately 110k analytical rows.
+
+Stage 2 is built independently from the original Olist transactional source and preserves all order statuses before warehouse transformations. Therefore, the combined initial and delta datasets contain approximately 112k rows.
+
+The difference is intentional and does not indicate missing data or a pipeline error. The cleaned Stage 1 output is used for EDA and ground-truth analytical exercises. **RFM is independently computed from eligible purchase records in `df_raw`**, while Stage 2 represents the broader transactional pipeline, including all order statuses.
 
 ---
 
@@ -250,15 +272,16 @@ The dataset is sorted by `order_purchase_timestamp` and split chronologically in
 90% -> initial_load.csv
 10% -> natural later-order delta
 ```
-
 The delta is then enriched with controlled test cases for the required loading scenarios:
 
 - **new records** — naturally later records from the 10% chronological delta,
-- **SCD Type 1** — selected existing orders receive an updated `order_status`,
-- **SCD Type 2** — selected existing customers receive changed location attributes,
+- **SCD Type 1** — an existing product-category translation is manually changed from `health_beauty` to `health_and_beauty` while keeping the same `product_category_name` business key,
+- **SCD Type 2** — in addition to natural customer address changes present in the source data, 10 existing customers with later orders are deliberately selected and their location is manually changed to `RJ / rio de janeiro / 20000`,
 - **exact duplicates** — selected initial-load rows are repeated to test idempotency.
 
-No artificial new `order_id` is manufactured for the SCD2 test. Customer history changes are tied to real later order events.
+The SCD1 change is displayed in the notebook as a before/after comparison.
+
+No artificial `order_id` is created for the SCD2 test. The manually injected location changes are attached to real later orders of existing customers. During the delta load, the previous customer version is closed and a new current version is created.
 
 The notebook exports:
 
@@ -342,21 +365,25 @@ The final current version ends at:
 9999-12-31 23:59:59
 ```
 
-A partial unique index ensures only one current version exists for each `customer_unique_id`.
+A partial unique index ensures only one current version exists for each `customer_unique_id`. In addition to natural address changes present in the source data, the simulated delta manually changes the location of 10 existing customers to `RJ / rio de janeiro / 20000`. This provides explicit SCD2 test cases: the previous version is closed by setting its `valid_to` and `is_current = FALSE`, while the new location becomes the current version.
 
 `core.orders` keeps `customer_unique_id` rather than a physical foreign key to one customer version. The correct `customer_sk` is resolved later by the temporal join when the fact table is loaded.
 
 ### SCD Type 1
 
-The incremental load applies `ON CONFLICT ... DO UPDATE` where the latest value should overwrite the existing value.
+SCD Type 1 is used for dimension attributes where the latest value should overwrite the previous value without preserving history.
 
-Examples include:
+The simulated delta manually changes an existing product-category translation:
 
-- order status / order milestone timestamps,
-- product attributes,
-- product-category translation.
+```text
+product_category_name: beleza_saude
+before: health_beauty
+after:  health_and_beauty
+```
 
-Updates use `IS DISTINCT FROM` where relevant so unchanged records are not rewritten unnecessarily.
+The business key `product_category_name` remains unchanged, while `product_category_name_english` is overwritten through `ON CONFLICT ... DO UPDATE`.
+
+The notebook displays the manually injected value before and after the change. Product and product-category upserts use the same overwrite approach for changed dimension attributes.
 
 ### Deduplication and idempotency
 
@@ -386,6 +413,8 @@ mart.dim_product
 mart.dim_seller
 mart.dim_date
 ```
+
+`mart.dim_seller` intentionally contains only `seller_id` in the current implementation because the Stage 2 pipeline carries only the seller identifier into the warehouse. The dimension is kept as a separate star-schema entity and can be enriched with additional seller attributes in a future extension.
 
 ### Fact table
 
@@ -458,6 +487,9 @@ segment
 
 RFM values are populated only on the **current SCD2 customer version**. Historical versions retain their location history without duplicating a stale RFM snapshot.
 
+Customers not eligible for RFM intentionally retain `NULL` RFM attributes and `NULL` segment in `mart.dim_customer`. The final segmentation covers **94,983 of 95,420** unique source customers. The other **437** are excluded by purchase-status eligibility (431 canceled-only and 6 unavailable-only), not by delivery completion or product weight.
+
+
 Brazilian states are grouped into:
 
 ```text
@@ -505,38 +537,54 @@ mart_create.sql
 data_to_mart.sql
 reset_stage.sql
 delta_load.sql
+checks.sql
 ```
 
 Responsibilities:
 
 - `stage_create.sql` — creates Stage, Core and Mart schemas plus Stage tables.
-- `data_to_stage.sql` — truncates and loads the initial batch and RFM segmentation into Stage.
+- `data_to_stage.sql` — truncates `stage.raw_orders` and `stage.rfm_temp` **and executes the two initial CSV `COPY` commands** (the files must already be accessible to PostgreSQL).
 - `core_create.sql` — creates the normalized Core model, constraints and indexes.
 - `data_to_core.sql` — performs the initial Stage-to-Core load and builds initial SCD2 history.
 - `mart_create.sql` — creates the reporting Star Schema.
-- `data_to_mart.sql` — loads / upserts dimensions and fact data, resolves the temporal customer key and calculates delivery fields.
-- `reset_stage.sql` — truncates only `stage.raw_orders` and loads `delta_load.csv`; `stage.rfm_temp` is retained.
+- `data_to_mart.sql` — loads / upserts dimensions and fact data, resolves the temporal customer key and calculates reporting fields.
+- `reset_stage.sql` — truncates only `stage.raw_orders` before the simulated delta load; `stage.rfm_temp` is retained.
 - `delta_load.sql` — performs the incremental Core load, including new records, SCD1, SCD2 and duplicate-safe processing.
+- `checks.sql` — contains validation queries for row counts, duplicate detection, orphan keys, SCD behavior, RFM coverage and revenue reconciliation.
+
+CSV files are loaded into Stage using PostgreSQL `COPY`, with paths appropriate for the database server environment.
 
 ## Initial load order
 
-Run manually in this order:
+For a fresh database, copy the generated initial and RFM CSVs to the PostgreSQL server/container first (see [Docker](#docker)). Then execute the SQL scripts **in the following order**:
 
 ```text
 1. stage_create.sql
-2. data_to_stage.sql
+2. data_to_stage.sql         -- truncates Stage tables and COPY-loads both CSVs
 3. core_create.sql
 4. data_to_core.sql
 5. mart_create.sql
 6. data_to_mart.sql
 ```
 
-`data_to_stage.sql` loads:
+The supplied `data_to_stage.sql` already contains:
 
-```text
-/initial_load.csv
-/olist_rfm_segmentation.csv
+```sql
+TRUNCATE TABLE stage.raw_orders;
+TRUNCATE TABLE stage.rfm_temp;
+
+COPY stage.raw_orders
+FROM '/initial_load.csv'
+DELIMITER ','
+CSV HEADER;
+
+COPY stage.rfm_temp
+FROM '/olist_rfm_segmentation.csv'
+DELIMITER ','
+CSV HEADER;
 ```
+
+**Do not execute these `COPY` statements again manually after running `data_to_stage.sql`.** The shown file paths are the paths used by the supplied SQL script; update them if your PostgreSQL container/server uses different locations. Running this initial-load script again truncates and reloads both Stage tables, so it is **not** the procedure for the delta load.
 
 ## Delta load order
 
@@ -544,20 +592,21 @@ After the initial load:
 
 ```text
 1. reset_stage.sql
-2. delta_load.sql
-3. data_to_mart.sql
+2. load delta_load.csv into stage.raw_orders
+3. delta_load.sql
+4. data_to_mart.sql
 ```
 
-`reset_stage.sql` replaces only the current raw Stage batch:
+`reset_stage.sql` clears only the current raw Stage batch. Load the simulated delta with:
 
 ```sql
-TRUNCATE TABLE stage.raw_orders;
-
 COPY stage.raw_orders
 FROM '/delta_load.csv'
 DELIMITER ','
 CSV HEADER;
 ```
+
+The path shown above is an example and can be changed according to the PostgreSQL server environment.
 
 `stage.rfm_temp` remains available for customer enrichment.
 
@@ -569,7 +618,7 @@ Re-running the same delta is designed not to create duplicate transaction rows o
 
 PostgreSQL runs inside Docker.
 
-Docker is used only to make generated CSV files available on the PostgreSQL server filesystem. SQL scripts are executed manually in the database client.
+For the Docker setup used in this project, generated CSV files can be copied to the PostgreSQL container before running the corresponding `COPY` commands.
 
 Check the PostgreSQL container name:
 
@@ -577,7 +626,7 @@ Check the PostgreSQL container name:
 docker ps
 ```
 
-Copy the generated files into the container:
+Example:
 
 ```bash
 docker cp initial_load.csv <postgres_container>:/initial_load.csv
@@ -585,17 +634,9 @@ docker cp delta_load.csv <postgres_container>:/delta_load.csv
 docker cp olist_rfm_segmentation.csv <postgres_container>:/olist_rfm_segmentation.csv
 ```
 
-The SQL scripts expect:
+These are the server-side paths referenced by the supplied `data_to_stage.sql` and the delta `COPY` example. Change the SQL file paths if you use a different container mount or server directory.
 
-```text
-/initial_load.csv
-/delta_load.csv
-/olist_rfm_segmentation.csv
-```
-
-Because PostgreSQL `COPY` reads from the database-server filesystem, the CSV files must exist inside the container before the related SQL scripts are executed.
-
-No `docker cp` commands are stored inside the SQL scripts.
+PostgreSQL `COPY` reads files from the database-server filesystem, so the path used in each `COPY` command must point to a file accessible by the PostgreSQL server. The account running PostgreSQL must also have permission to read the files.
 
 ---
 
@@ -669,52 +710,27 @@ The operational dashboard is designed to monitor:
 
 ### Key metrics and definitions
 
-The main Stage 3 metrics include:
+The principal Stage 3 measures use the Mart model. Unless stated otherwise, dashboard-wide sales measures **exclude `canceled` orders**; the warehouse retains these transactions for auditability.
 
-- **Total Revenue** — total customer charge including product price and freight.
+- **Total Revenue** — product price plus freight for non-canceled orders, calculated from `mart.fact_sales[total_value]`.
 
-```text
-Total Revenue = SUMX(fact_sales, price + freight_value)
-```
+- **Total Orders** — distinct non-canceled `order_id`, returning zero instead of blank when there are no qualifying orders.
 
-- **Total Orders** — unique number of orders.
-
-```text
-Total Orders = DISTINCTCOUNT(fact_sales[order_id])
-```
-
-- **Average Order Value (AOV)** — revenue per unique order.
-
-```text
-AOV = Total Revenue / Total Orders
-```
-
-- **Revenue Last Year** — revenue for the equivalent period in the previous year.
-
-```DAX
-Revenue Last Year =
-CALCULATE(
-    [Total Revenue],
-    SAMEPERIODLASTYEAR(dim_date[full_date])
-)
-```
-
-- **Revenue YoY %** — percentage change against the equivalent period in the previous year.
-
-```text
-Revenue YoY % = (Total Revenue - Revenue Last Year) / Revenue Last Year
-```
-
-- **Total Customers** — unique customers in the current filter context.
+- **Average Order Value (AOV)** — Total Revenue / Total Orders.
+- **Total Customers** — distinct customers in the applicable non-canceled reporting context.
 - **Orders per Customer** — Total Orders / Total Customers.
 - **Revenue per Customer** — Total Revenue / Total Customers.
-- **Average Freight** — average `freight_value`.
-- **Total Delayed Orders** — unique orders where `delayed_flag = 1`.
-- **Average Delivery Days** — average delivery duration calculated once per order.
-- **Average Delay Days** — average number of days past the estimated delivery date for delayed orders.
-- **Delayed Order Rate %** — delayed orders divided by SLA-eligible orders.
-- **% On-Time Delivery** — on-time orders divided by SLA-eligible orders.
-- **Regional Revenue Share %** — selected geographical revenue divided by the total revenue available within the user's authorized RLS scope.
+- **Month-over-Month Change (%)** — compares the latest completed reporting month with the preceding month; avoids comparing an incomplete September 2018 with August 2018.
+- **Average Freight** — average freight per relevant fact row.
+- **Total Delayed Orders** — distinct non-canceled orders where `delayed_flag = 1`.
+- **Average Delivery Days** — duration measured per order, not per order item.
+- **Average Delay Days** — mean days beyond the expected delivery date for delayed orders.
+- **SLA Eligible Orders** — orders for which actual and estimated delivery dates are both available.
+- **Delayed Order Rate %** — delayed orders / SLA Eligible Orders.
+- **% On-Time Delivery** — on-time orders / SLA Eligible Orders.
+- **Regional Revenue Share %** — selected geographical revenue relative to total revenue within the user's effective RLS scope.
+
+Prior-year comparison and `SAMEPERIODLASTYEAR()` are discussed in the Stage 3 BI requirements / DAX context; the final KPI Overview emphasizes **MoM Change (%)**, not a YoY card.
 
 ### Delivery SLA definition
 
@@ -732,7 +748,7 @@ delay_days = actual delivery date - estimated delivery date
 
 ### RFM segmentation
 
-RFM is calculated at `customer_unique_id` level using:
+RFM is calculated in Python at `customer_unique_id` level for eligible order statuses (`approved`, `invoiced`, `processing`, `shipped`, `delivered`) and loaded into the current Mart customer version. It uses:
 
 - **Recency** — days since the latest purchase,
 - **Frequency** — number of unique orders,
@@ -748,6 +764,8 @@ Regulars
 Sleeping
 ```
 
+The five RFM segments contain **94,983** customers. Customers without an eligible RFM purchase remain `NULL` rather than being assigned an artificial `Not Segmented` label. Segmented visualizations exclude null segments at the **visual level**; global KPI cards are not filtered by the same exclusion.
+
 ---
 
 ## Functional Requirements
@@ -757,18 +775,20 @@ The report contains four main business pages.
 ### Strategic dashboard — Executive Director
 
 1. **KPI Overview**
-2. **Map / Geographical Analysis**
-3. **RFM Segmentation**
+2. **Geographic Sales Analysis**
+3. **Customer Segmentation RFM**
 
 ### Operational dashboard — Operations Manager
 
-4. **Operations**
+4. **Delivery Performance**
 
 The report also contains supporting tooltip pages, an `Order_Details` drill-through page and methodology / FAQ content. Supporting pages are not counted as main dashboard pages.
 
-The strategic experience supports navigation through interactive buttons and bookmarks. The Map page provides State -> City drill-down and a state-level fallback visual if map visuals are unavailable.
+The experience supports navigation buttons and shared report filters. Customer State, City, Product Category and Current RFM Segment slicers are arranged together above the KPI cards. Date-range filtering is also provided. Contextual information icons explain non-obvious KPI and visualization definitions.
 
-The Operations page shows delivery-time distribution, delivery bottlenecks, delayed-order trends and visually highlights delayed or anomalous records.
+The geographical page provides **State -> City** drill-down, a dynamic location chart title based on the selected metric (Revenue, Orders, AOV), and supporting state-level analysis.
+
+The Delivery Performance page shows delivery-time distribution, geographical delivery issues and a combined order-volume / delayed-rate trend.
 
 ---
 
@@ -776,12 +796,9 @@ The Operations page shows delivery-time distribution, delivery bottlenecks, dela
 
 ### Dynamic Row-Level Security
 
-Power BI uses Dynamic RLS based on `mart.dim_security`.
+The report's dynamic-security design uses the `Dynamic_Security` role and a security mapping table in the Power BI model (referred to as `mart dim_security` in the model). The signed-in user is identified using `USERPRINCIPALNAME()`; regional-manager users are restricted to assigned customer states, while Director access spans all states.
 
-- Regional / Operations Managers are restricted to their assigned Brazilian state or states through `customer_state`.
-- The logged-in user is identified with `USERPRINCIPALNAME()`.
-- The Executive Director has unrestricted access to all states.
-- Security is applied through the data model rather than being embedded inside revenue measures.
+**Deployment note:** the security mapping was maintained in the Power BI model in this project iteration. It should not be confused with a verified physical `mart.dim_security` table in PostgreSQL. For a production deployment, this mapping would need a governed warehouse or identity-management source, and any redundant test roles should be reviewed before publishing.
 
 ### Advanced DAX
 
@@ -789,7 +806,7 @@ The report includes the required advanced DAX patterns:
 
 - `SUMX` for row-by-row Total Revenue calculation,
 - `REMOVEFILTERS` for revenue-share / total-context calculations while respecting RLS,
-- `SAMEPERIODLASTYEAR` for previous-year comparison,
+- a prior-year comparison pattern with `SAMEPERIODLASTYEAR` documented in the BI analytical work (the KPI Overview itself presents MoM Change),
 - time intelligence through the active order-date relationship with `mart.dim_date`.
 
 The date dimension is marked as the model's Date Table.
@@ -818,51 +835,48 @@ Power BI connects to the reporting-ready Mart layer.
 
 Strategic overview containing:
 
-- Total Revenue,
-- Total Orders,
-- Revenue YoY %,
-- Average Order Value,
-- Monthly Trend,
-- state-level summary with conditional data bars,
-- date filtering,
-- metric selection.
+- Total Revenue, Total Orders and Average Order Value,
+- **Month-over-Month Change (%)** based on completed months,
+- Monthly Trend with a Revenue / Total Orders / AOV metric selector,
+- a state-level Total Orders table with data bars,
+- shared business filters and date-range filtering.
 
-### Map
+The partial **September 2018** (data only through September 3) is excluded from monthly trend presentation using a **visual-level date cutoff of August 31, 2018**, so it does not create a misleading apparent monthly collapse. Global report data and other KPI contexts retain their normal date coverage.
+
+### Geographic Sales Analysis
 
 Geographical and categorical analysis containing:
 
-- **Selected Metric by Location** with State -> City drill-down,
-- **Top 5 Category Revenue**,
-- **Selected Metric by State** fallback visual.
+- **Selected Metric by Location** with **State -> City** drill-down,
+- dynamic visual title: **Revenue by Location / Orders by Location / AOV by Location**,
+- **Top 5 Categories by Revenue**,
+- supporting state-level metric visualization.
 
-The map is focused on Brazil and the supporting state visual allows analysis even when map visuals are unavailable.
+The geography analysis focuses on Brazil and includes a fallback state view for locations where map visuals are unavailable. Operational context, including the on-time delivery KPI, uses an **illustrative** color convention (green >= 95%, amber >= 90% and < 95%, red < 90%); these thresholds are not an official published Olist SLA.
 
-### RFM
+### Customer Segmentation RFM
 
 Customer segmentation analysis containing:
 
-- Total Customers,
-- AOV,
-- Orders per Customer,
-- Revenue per Customer,
-- **Revenue by RFM Segment**,
-- **Revenue per Customer by Segment**,
-- customer distribution by segment,
-- segment-level detail table.
+- **Total Customers**, **AOV**, **Orders / Customer**, **Revenue per Customer** KPI cards,
+- **RFM Segment Value** metric-switching chart (Total Revenue or Revenue per Customer),
+- **Customers by RFM Segment** donut chart showing the five real segment names and proportions,
+- behavioral segment table with **Total Customers**, **Avg Recency (Days)**, **Orders / Customer**, and **AOV**.
 
-### Operations
+RFM charts and the segment table filter out `NULL` segment values **at the visual level**, not at page level. This keeps the global customer KPI intact. For the full non-canceled report scope, **94,989** customers appear in the global KPI, while **94,983** appear in the five RFM segments; the difference is **6 unavailable-only customers** without an eligible RFM status. The 431 canceled-only source customers are excluded from the non-canceled KPI scope.
+
+### Delivery Performance
 
 Operational delivery monitoring containing:
 
-- **Total Delayed Orders**,
-- **Avg Delivery Days**,
-- **Avg Delay Days**,
-- **Delayed Order Rate %**,
-- **Delivery Bottlenecks by Region / State**,
-- **Delivery Time Distribution**,
-- **Delayed Orders Trend**.
+- **Total Delayed Orders**, **% On-Time Delivery**, **Avg Delay Days**, **Delayed Order Rate %**,
+- **Delayed Orders by State**,
+- **Delivery Time Distribution** with data labels,
+- **Order Volume vs Delay Rate** (order counts and delayed-order-rate line).
 
-The operational page is designed to surface delivery exceptions and geographical bottlenecks for day-to-day action.
+The delayed-rate line uses a separate chart measure to suppress percentages based on fewer than **100 SLA-eligible orders** in a month. This avoids misleading values such as the original 100% rate for September 2016, which had only two eligible orders. Order-volume bars are not suppressed by this rule, and zero-order months can remain on the time axis.
+
+The incomplete September 2018 is excluded from this monthly trend at the **visual level** (through August 31, 2018), while the original measures and report-wide KPIs remain unchanged. Tooltip icons clarify the operational definitions.
 
 ---
 
@@ -895,7 +909,7 @@ The Regulars segment contains the largest number of customers and generates the 
 
 ### Pattern 2 — Delivery delays show visible peaks during periods of higher activity
 
-Most deliveries are completed within the 6-10 day delivery-time bucket, while the overall delayed-order rate is approximately **6.77%**. The delayed-order trend shows visible peaks, particularly during late 2017 and early 2018.
+The delivery-time distribution has its largest group in the **6–10 day** bucket. Delayed-order-rate patterns show noticeable peaks during late 2017 and early 2018; the report now suppresses monthly percentages for periods with fewer than 100 SLA-eligible orders to avoid drawing conclusions from a very small sample.
 
 **Hypothesis:** periods with higher order activity may put additional pressure on fulfillment and logistics capacity, contributing to more delayed deliveries.
 
@@ -905,22 +919,12 @@ Most deliveries are completed within the 6-10 day delivery-time bucket, while th
 
 ## SQL vs Power BI Validation
 
-Three aggregated dashboard metrics were independently validated against raw SQL queries executed on the Mart layer. Side-by-side screenshots are included in the Stage 3 deliverables.
+Three aggregated dashboard metrics were independently validated against the Mart layer. Validation results and screenshots are included in the Stage 3 deliverables; query code remains in the project SQL files rather than in this README.
 
 ### 1. Total Revenue
 
 Power BI result: approximately **R$ 15.74M**  
 SQL result: **15,737,887.53**
-
-```sql
-SELECT
-    ROUND(
-        SUM(COALESCE(price, 0) + COALESCE(freight_value, 0))::numeric,
-        2
-    ) AS total_revenue
-FROM mart.fact_sales
-WHERE order_status <> 'canceled';
-```
 
 Validation screenshot:
 
@@ -933,13 +937,6 @@ RevenueSQL.png
 Power BI result: **98,208**  
 SQL result: **98,208**
 
-```sql
-SELECT
-    COUNT(DISTINCT order_id) AS total_orders
-FROM mart.fact_sales
-WHERE order_status <> 'canceled';
-```
-
 Validation screenshot:
 
 ```text
@@ -951,14 +948,6 @@ TotalOrdersSQL.png
 Power BI result: **6,534**  
 SQL result: **6,534**
 
-```sql
-SELECT
-    COUNT(DISTINCT order_id) AS total_delayed_orders
-FROM mart.fact_sales
-WHERE delayed_flag = 1
-  AND order_status <> 'canceled';
-```
-
 Validation screenshot:
 
 ```text
@@ -966,6 +955,24 @@ DelayedOrdersSQL.png
 ```
 
 The three validation checks confirm that the selected aggregated Power BI values match the corresponding Mart-level SQL results.
+
+### Additional warehouse and RFM validation
+
+The rebuilt warehouse and refreshed RFM enrichment were checked after the simulated delta load:
+
+| Validation | Verified result |
+|---|---:|
+| `mart.fact_sales` rows (order-item grain) | 112,650 |
+| `core.orders` rows | 98,666 |
+| `stage.rfm_temp` customers | 94,983 |
+| Customers with no eligible RFM segment | 437 |
+| RFM source-to-current-Mart segment mismatches | **0** |
+| Fact / dimension orphan-key checks | **0** |
+| Duplicate order-item / current-customer-version checks | **0** |
+
+The RFM source-to-Mart validation joins by `customer_unique_id` and `is_current = TRUE`. All five segments matched exactly, with no missing or mismatched current customer assignments.
+
+An additional full-status Mart reconciliation verified `SUM(price + freight_value)` = **R$ 15,843,553.24** without a difference; this is distinct from the non-canceled Power BI Total Revenue result of **R$ 15,737,887.53**. Both values are valid for their respective order-status populations.
 
 ---
 
@@ -991,7 +998,8 @@ Project/
 |   |   |-- mart_create.sql
 |   |   |-- data_to_mart.sql
 |   |   |-- reset_stage.sql
-|   |   `-- delta_load.sql
+|   |   |-- delta_load.sql
+|   |   `-- checks.sql
 |   |
 |   |-- diagrams/
 |   |   |-- flowchart_olist.png
@@ -1058,26 +1066,50 @@ docker cp olist_rfm_segmentation.csv <postgres_container>:/olist_rfm_segmentatio
 
 ## 5. Build the initial warehouse
 
-Run manually:
+After the two initial CSVs have been copied into the PostgreSQL container, execute these scripts in order:
 
 ```text
 stage_create.sql
-data_to_stage.sql
+    ↓
+data_to_stage.sql  (TRUNCATE + COPY of initial_load.csv and olist_rfm_segmentation.csv)
+    ↓
 core_create.sql
+    ↓
 data_to_core.sql
+    ↓
 mart_create.sql
+    ↓
 data_to_mart.sql
 ```
+
+`data_to_stage.sql` already executes the CSV imports. Its `COPY` file paths assume `/initial_load.csv` and `/olist_rfm_segmentation.csv` exist on the database server/container. **Do not import the same files twice.**
 
 ## 6. Process the simulated incremental load
 
-Run manually:
+Run:
 
 ```text
 reset_stage.sql
+```
+
+Load the simulated delta:
+
+```sql
+COPY stage.raw_orders
+FROM '/delta_load.csv'
+DELIMITER ','
+CSV HEADER;
+```
+
+Then run:
+
+```text
 delta_load.sql
 data_to_mart.sql
+checks.sql
 ```
+
+`checks.sql` validates the final warehouse using row-count, duplicate, orphan-key, SCD, RFM-coverage and revenue-reconciliation checks. A separate RFM source-to-Mart comparison confirmed zero mismatches across all five segments.
 
 ## 7. Review Stage 3 requirements
 
@@ -1097,7 +1129,7 @@ Open:
 Innowise_Project_Stage3.pbix
 ```
 
-and connect / refresh against the PostgreSQL Mart layer if required by the local environment.
+and connect / refresh against the PostgreSQL Mart layer if required by the local environment. Review the PostgreSQL server/database connection settings, the loaded security mapping and the `Dynamic_Security` role before sharing the report. The available data extends to **2018-09-03**; the monthly charts exclude the incomplete September 2018 as described above.
 
 ---
 
