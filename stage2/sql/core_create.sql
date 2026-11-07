@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS core.customers (
     customer_zip_code_prefix VARCHAR,
     customer_city VARCHAR,
     customer_state VARCHAR,
+
+    geolocation_lat DOUBLE PRECISION,
+    geolocation_lng DOUBLE PRECISION,
+
     valid_from TIMESTAMP NOT NULL,
     valid_to TIMESTAMP NOT NULL,
     is_current BOOLEAN NOT NULL,

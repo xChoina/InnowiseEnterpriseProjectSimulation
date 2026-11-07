@@ -1,4 +1,5 @@
-begin;
+BEGIN;
+
 INSERT INTO core.sellers (seller_id)
 SELECT DISTINCT seller_id
 FROM stage.raw_orders
@@ -22,6 +23,7 @@ ORDER BY
 ON CONFLICT (product_category_name) DO UPDATE SET
     product_category_name_english =
         EXCLUDED.product_category_name_english;
+
 
 INSERT INTO core.products (
     product_id,
@@ -88,6 +90,8 @@ events AS (
         s.customer_zip_code_prefix,
         s.customer_city,
         s.customer_state,
+        s.geolocation_lat,
+        s.geolocation_lng,
         c.customer_unique_id AS existing_customer,
         c.customer_zip_code_prefix AS current_zip,
         c.customer_city AS current_city,
@@ -138,37 +142,21 @@ changes AS (
         event_timestamp,
         customer_zip_code_prefix,
         customer_city,
-        customer_state
+        customer_state,
+
+        geolocation_lat,
+        geolocation_lng
 
     FROM ordered
 
-    WHERE
-        (
-            rn = 1
-            AND existing_customer IS NULL
-        )
-
-        OR
-
-        (
-            rn = 1
-            AND existing_customer IS NOT NULL
-            AND (
-                customer_zip_code_prefix IS DISTINCT FROM current_zip
+    WHERE(rn = 1 AND existing_customer IS NULL)
+        OR(rn = 1 AND existing_customer IS NOT null AND (customer_zip_code_prefix IS DISTINCT FROM current_zip
                 OR customer_city IS DISTINCT FROM current_city
-                OR customer_state IS DISTINCT FROM current_state
-            )
+                OR customer_state IS DISTINCT FROM current_state)
         )
-
-        OR
-
-        (
-            rn > 1
-            AND (
-                customer_zip_code_prefix IS DISTINCT FROM previous_zip
+        OR(rn > 1 AND (customer_zip_code_prefix IS DISTINCT FROM previous_zip
                 OR customer_city IS DISTINCT FROM previous_city
-                OR customer_state IS DISTINCT FROM previous_state
-            )
+                OR customer_state IS DISTINCT FROM previous_state)
         )
 )
 
@@ -177,6 +165,10 @@ SELECT
     customer_zip_code_prefix,
     customer_city,
     customer_state,
+
+    geolocation_lat,
+    geolocation_lng,
+
     event_timestamp AS valid_from,
 
     LEAD(event_timestamp) OVER (
@@ -185,6 +177,7 @@ SELECT
     ) AS next_valid_from
 
 FROM changes;
+
 
 UPDATE core.customers c
 SET
@@ -201,11 +194,14 @@ WHERE c.customer_unique_id = x.customer_unique_id
   AND c.is_current = TRUE
   AND c.valid_from < x.first_change;
 
+
 INSERT INTO core.customers (
     customer_unique_id,
     customer_zip_code_prefix,
     customer_city,
     customer_state,
+    geolocation_lat,
+    geolocation_lng,
     valid_from,
     valid_to,
     is_current
@@ -215,6 +211,10 @@ SELECT
     customer_zip_code_prefix,
     customer_city,
     customer_state,
+
+    geolocation_lat,
+    geolocation_lng,
+
     valid_from,
 
     COALESCE(
@@ -284,6 +284,7 @@ IS DISTINCT FROM ROW(
     EXCLUDED.order_estimated_delivery_date
 );
 
+
 INSERT INTO core.order_items (
     order_id,
     order_item_id,
@@ -316,4 +317,5 @@ ON CONFLICT (
     order_id,
     order_item_id
 ) DO NOTHING;
-commit;
+
+COMMIT;

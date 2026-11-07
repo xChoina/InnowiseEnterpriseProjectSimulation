@@ -1,6 +1,5 @@
 BEGIN;
 
-
 INSERT INTO mart.dim_date (
     date_id,
     full_date,
@@ -35,7 +34,6 @@ SELECT
     ])[EXTRACT(MONTH FROM datum)::INT] AS month_name,
 
     TO_CHAR(datum, 'YYYY-MM') AS year_month,
-
     EXTRACT(DAY FROM datum)::INT AS day,
 
     (ARRAY[
@@ -57,7 +55,6 @@ FROM (
 ) d
 
 ON CONFLICT (date_id) DO NOTHING;
-
 
 INSERT INTO mart.dim_seller (
     seller_id
@@ -111,16 +108,22 @@ INSERT INTO mart.dim_customer (
     customer_city,
     customer_state,
     customer_region,
+
+    geolocation_lat,
+    geolocation_lng,
+
     valid_from,
     valid_to,
     is_current,
+
     recency,
     frequency,
     monetary,
     m_score,
     r_score,
     f_score,
-    segment
+    segment,
+    current_rfm_segment
 )
 SELECT
     c.customer_sk,
@@ -159,6 +162,8 @@ SELECT
         ELSE NULL
     END AS customer_region,
 
+    c.geolocation_lat,
+    c.geolocation_lng,
     c.valid_from,
     c.valid_to,
     c.is_current,
@@ -189,13 +194,14 @@ SELECT
 
     CASE
         WHEN c.is_current THEN r.segment
-    END
+    END,
+
+    r.segment AS current_rfm_segment
 
 FROM core.customers c
 
 LEFT JOIN stage.rfm_temp r
     ON c.customer_unique_id = r.customer_unique_id
-   AND c.is_current = TRUE
 
 ON CONFLICT (customer_sk) DO UPDATE SET
     customer_unique_id = EXCLUDED.customer_unique_id,
@@ -203,6 +209,10 @@ ON CONFLICT (customer_sk) DO UPDATE SET
     customer_city = EXCLUDED.customer_city,
     customer_state = EXCLUDED.customer_state,
     customer_region = EXCLUDED.customer_region,
+
+    geolocation_lat = EXCLUDED.geolocation_lat,
+    geolocation_lng = EXCLUDED.geolocation_lng,
+
     valid_from = EXCLUDED.valid_from,
     valid_to = EXCLUDED.valid_to,
     is_current = EXCLUDED.is_current,
@@ -212,8 +222,8 @@ ON CONFLICT (customer_sk) DO UPDATE SET
     m_score = EXCLUDED.m_score,
     r_score = EXCLUDED.r_score,
     f_score = EXCLUDED.f_score,
-    segment = EXCLUDED.segment;
-
+    segment = EXCLUDED.segment,
+    current_rfm_segment = EXCLUDED.current_rfm_segment;
 
 CREATE TEMP TABLE tmp_fact_sales
 ON COMMIT DROP
@@ -316,7 +326,6 @@ LEFT JOIN core.customers c
    AND o.order_purchase_timestamp <
        c.valid_to;
 
-
 DO $$
 DECLARE
     missing_customer_versions INT;
@@ -337,7 +346,6 @@ BEGIN
 
 END $$;
 
-
 INSERT INTO mart.fact_sales (
     order_id,
     order_item_id,
@@ -357,7 +365,6 @@ INSERT INTO mart.fact_sales (
     delay_days,
     delayed_flag
 )
-
 SELECT
     order_id,
     order_item_id,
@@ -384,7 +391,6 @@ ON CONFLICT (
     order_item_id
 )
 DO UPDATE SET
-
     order_status = EXCLUDED.order_status,
     price = EXCLUDED.price,
     freight_value = EXCLUDED.freight_value,
@@ -402,7 +408,6 @@ WHERE ROW(
     mart.fact_sales.delay_days,
     mart.fact_sales.delayed_flag
 )
-
 IS DISTINCT FROM ROW(
     EXCLUDED.order_status,
     EXCLUDED.price,
@@ -412,6 +417,5 @@ IS DISTINCT FROM ROW(
     EXCLUDED.delay_days,
     EXCLUDED.delayed_flag
 );
-
 
 COMMIT;

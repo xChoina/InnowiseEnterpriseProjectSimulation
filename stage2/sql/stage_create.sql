@@ -36,7 +36,12 @@ CREATE TABLE IF NOT EXISTS stage.raw_orders (
     product_height_cm DECIMAL(10,2),
     product_width_cm DECIMAL(10,2),
 
-    product_category_name_english VARCHAR
+    product_category_name_english VARCHAR,
+    
+    geolocation_zip_code_prefix VARCHAR,
+	geolocation_state VARCHAR,
+	geolocation_lat DOUBLE PRECISION,
+	geolocation_lng DOUBLE PRECISION
 );
 
 

@@ -51,8 +51,8 @@ ORDER by product_id, order_purchase_timestamp DESC NULLS LAST, order_id DESC
 ON CONFLICT (product_id)
 DO NOTHING;
 
-WITH customer_events AS (
 
+WITH customer_events AS (
     SELECT DISTINCT ON (
         customer_unique_id,
         order_purchase_timestamp
@@ -62,17 +62,18 @@ WITH customer_events AS (
         order_purchase_timestamp AS event_timestamp,
         customer_zip_code_prefix,
         customer_city,
-        customer_state
+        customer_state,
+        geolocation_lat,
+        geolocation_lng
     FROM stage.raw_orders
     WHERE customer_unique_id IS NOT NULL
       AND order_purchase_timestamp IS NOT NULL
-    ORDER by customer_unique_id, order_purchase_timestamp, order_id DESC
+    ORDER BY customer_unique_id, order_purchase_timestamp, order_id DESC
 ),
 
 ordered_events AS (
-
-    select *,
-		ROW_NUMBER() OVER (
+    SELECT *,
+        ROW_NUMBER() OVER (
             PARTITION BY customer_unique_id
             ORDER BY event_timestamp, order_id
         ) AS rn,
@@ -84,13 +85,12 @@ ordered_events AS (
             PARTITION BY customer_unique_id
             ORDER BY event_timestamp, order_id
         ) AS previous_city,
-       LAG(customer_state) OVER (
+        LAG(customer_state) OVER (
             PARTITION BY customer_unique_id
             ORDER BY event_timestamp, order_id
         ) AS previous_state
     FROM customer_events
 ),
-
 
 changes AS (
     SELECT
@@ -99,19 +99,24 @@ changes AS (
         event_timestamp,
         customer_zip_code_prefix,
         customer_city,
-        customer_state
+        customer_state,
+        geolocation_lat,
+        geolocation_lng
     FROM ordered_events
-    where rn = 1
-		OR customer_zip_code_prefix IS DISTINCT FROM previous_zip
-        OR customer_city IS DISTINCT FROM previous_city
-        OR customer_state IS DISTINCT FROM previous_state
+    WHERE rn = 1
+       OR customer_zip_code_prefix IS DISTINCT FROM previous_zip
+       OR customer_city IS DISTINCT FROM previous_city
+       OR customer_state IS DISTINCT FROM previous_state
 ),
+
 versions AS (
     SELECT
         customer_unique_id,
         customer_zip_code_prefix,
         customer_city,
         customer_state,
+        geolocation_lat,
+        geolocation_lng,
         event_timestamp AS valid_from,
         LEAD(event_timestamp) OVER (
             PARTITION BY customer_unique_id
@@ -125,6 +130,8 @@ INSERT INTO core.customers (
     customer_zip_code_prefix,
     customer_city,
     customer_state,
+    geolocation_lat,
+    geolocation_lng,
     valid_from,
     valid_to,
     is_current
@@ -134,6 +141,8 @@ SELECT
     customer_zip_code_prefix,
     customer_city,
     customer_state,
+    geolocation_lat,
+    geolocation_lng,
     valid_from,
     COALESCE(
         next_valid_from,
@@ -141,6 +150,7 @@ SELECT
     ),
     next_valid_from IS NULL
 FROM versions
+
 ON CONFLICT (
     customer_unique_id,
     valid_from

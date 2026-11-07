@@ -10,3 +10,4 @@ COPY stage.rfm_temp
 FROM '/olist_rfm_segmentation.csv'
 DELIMITER ','
 CSV HEADER;
+

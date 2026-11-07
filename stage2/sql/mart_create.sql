@@ -1,6 +1,5 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
-
 CREATE TABLE IF NOT EXISTS mart.dim_customer (
     customer_sk INT PRIMARY KEY,
     customer_unique_id VARCHAR NOT NULL,
@@ -8,6 +7,8 @@ CREATE TABLE IF NOT EXISTS mart.dim_customer (
     customer_city VARCHAR,
     customer_state VARCHAR,
     customer_region VARCHAR,
+    geolocation_lat DOUBLE PRECISION,
+    geolocation_lng DOUBLE PRECISION,
     valid_from TIMESTAMP NOT NULL,
     valid_to TIMESTAMP NOT NULL,
     is_current BOOLEAN NOT NULL,
@@ -17,8 +18,10 @@ CREATE TABLE IF NOT EXISTS mart.dim_customer (
     m_score INT,
     r_score INT,
     f_score INT,
-    segment VARCHAR
+    segment VARCHAR,
+    current_rfm_segment VARCHAR
 );
+
 
 CREATE TABLE IF NOT EXISTS mart.dim_product (
     product_id VARCHAR PRIMARY KEY,
@@ -27,9 +30,11 @@ CREATE TABLE IF NOT EXISTS mart.dim_product (
     photos_qty INT
 );
 
+
 CREATE TABLE IF NOT EXISTS mart.dim_seller (
     seller_id VARCHAR PRIMARY KEY
 );
+
 
 CREATE TABLE IF NOT EXISTS mart.dim_date (
     date_id INT PRIMARY KEY,
@@ -44,17 +49,27 @@ CREATE TABLE IF NOT EXISTS mart.dim_date (
 );
 
 
+CREATE TABLE IF NOT EXISTS mart.dim_security (
+    security_id BIGSERIAL PRIMARY KEY,
+    user_email VARCHAR(255) NOT NULL,
+    access_role VARCHAR(50) NOT NULL,
+    customer_state VARCHAR(3)
+);
+
+
 CREATE TABLE IF NOT EXISTS mart.fact_sales (
     order_id VARCHAR,
     order_item_id INT,
     customer_sk INT,
     product_id VARCHAR,
     seller_id VARCHAR,
+
     order_date_id INT,
     approved_date_id INT,
     delivered_carrier_date_id INT,
     delivered_customer_date_id INT,
     estimated_delivery_date_id INT,
+
     order_status VARCHAR,
     price DECIMAL(10,2),
     freight_value DECIMAL(10,2),
@@ -62,6 +77,7 @@ CREATE TABLE IF NOT EXISTS mart.fact_sales (
     delivery_days INT,
     delay_days INT,
     delayed_flag INT,
+
     PRIMARY KEY (
         order_id,
         order_item_id
