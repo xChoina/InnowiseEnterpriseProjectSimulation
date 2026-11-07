@@ -37,7 +37,7 @@ Stage 1 — Python analysis      Stage 2 — Python load simulation
                                Power BI
 ```
 
-Stage 2 is rebuilt from the original Olist source data rather than from the Stage 1 cleaned analytical dataset. Stage 1 generates two separate analytical outputs: the delivered-order/positive-weight dataset for EDA, and an RFM table calculated independently from eligible purchase records (without a delivery-status or product-weight restriction). The RFM output enriches current customer records in the Mart.
+Stage 2 is rebuilt from the original Olist source data rather than from the Stage 1 cleaned analytical dataset. It also joins the Olist geolocation dataset using customer ZIP prefix and state, after aggregating duplicate geolocation points to median coordinates. Stage 1 produces a delivered-order/positive-weight dataset for EDA and a separate RFM table calculated from eligible purchase records. The RFM output is loaded into PostgreSQL and exposed by the customer Mart dimension.
 
 Architecture diagrams are stored with the Stage 2 files:
 
@@ -49,7 +49,7 @@ Architecture diagrams are stored with the Stage 2 files:
 
 # Stage 1 — Data Analysis
 
-Main file:
+Main file (uploaded version: `stage1(9).ipynb`; rename to `stage1.ipynb` for the final repository):
 
 ```text
 stage1.ipynb
@@ -57,7 +57,7 @@ stage1.ipynb
 
 ## Source files
 
-The notebook uses the following Olist datasets:
+Stage 1 and Stage 2 use the following six original Olist CSV datasets:
 
 ```text
 olist_order_items_dataset.csv
@@ -65,9 +65,10 @@ olist_orders_dataset.csv
 olist_customers_dataset.csv
 olist_products_dataset.csv
 product_category_name_translation.csv
+olist_geolocation_dataset.csv
 ```
 
-The main analytical dataset is built with left merges of order items, orders, customers, products and the product-category translation table.
+The main analytical dataset is built with left merges of order items, orders, customers, products and the product-category translation table. Geolocation is also joined using customer ZIP-code prefix and state, after aggregating source coordinates by ZIP-code prefix and state (median latitude/longitude) to avoid duplicating transactions. Stage 1 additionally uses state-level geolocation averages for its exploratory map; Stage 2 carries the enriched customer coordinates into the warehouse.
 
 The analysis runs on the full merged dataset; no artificial 10,000-row sample is applied before cleaning.
 
@@ -235,7 +236,7 @@ Brazilian_Ecomerce_report_final.html
 
 The cleaned dataset is a reference / ground-truth analytical output. It is **not** the main Stage 2 pipeline source.
 
-`olist_rfm_segmentation.csv` is loaded into `stage.rfm_temp` and later enriches the current customer version in `mart.dim_customer`.
+`olist_rfm_segmentation.csv` is loaded into `stage.rfm_temp` and enriches `mart.dim_customer`: its main RFM metrics apply to current customer versions, while the SQL-derived `current_rfm_segment` is also available on historical SCD2 versions.
 
 ### Stage 1 Ground Truth vs Stage 2 Pipeline Data
 
@@ -256,7 +257,7 @@ The difference is intentional and does not indicate missing data or a pipeline e
 
 # Stage 2 — Data Engineering
 
-Main file:
+Main file (uploaded version: `stage2(3).ipynb`; rename to `stage2.ipynb` for the final repository):
 
 ```text
 stage2.ipynb
@@ -276,7 +277,7 @@ The delta is then enriched with controlled test cases for the required loading s
 
 - **new records** — naturally later records from the 10% chronological delta,
 - **SCD Type 1** — an existing product-category translation is manually changed from `health_beauty` to `health_and_beauty` while keeping the same `product_category_name` business key,
-- **SCD Type 2** — in addition to natural customer address changes present in the source data, 10 existing customers with later orders are deliberately selected and their location is manually changed to `RJ / rio de janeiro / 20000`,
+- **SCD Type 2** — in addition to natural customer address changes in the source, 10 existing customers with later orders are deliberately moved to `RJ / rio de janeiro / 20010`, including the matching geographic coordinates,
 - **exact duplicates** — selected initial-load rows are repeated to test idempotency.
 
 The SCD1 change is displayed in the notebook as a before/after comparison.
@@ -289,6 +290,12 @@ The notebook exports:
 initial_load.csv
 delta_load.csv
 ```
+
+### Geolocation enrichment
+
+The additional source, `olist_geolocation_dataset.csv`, is merged using `customer_zip_code_prefix` + `customer_state` against the corresponding geolocation ZIP prefix and state. Geolocation points are first grouped by ZIP/state and summarized with median latitude and longitude to prevent one-to-many join duplication. ZIP prefixes are handled as strings.
+
+The merged transactional dataset retains **112,650 order-item rows**. Four geolocation-related fields are exported in the CSVs: `geolocation_zip_code_prefix`, `geolocation_state`, `geolocation_lat`, and `geolocation_lng`. Coordinates continue through Stage and Core to `mart.dim_customer`; the two geolocation join keys are not duplicated as independent customer attributes in Core. Missing coordinates remain nullable. Known out-of-country coordinate outliers are documented under [Outstanding Items](#outstanding-items) and have not yet been cleaned from the ETL.
 
 ---
 
@@ -311,7 +318,7 @@ stage.rfm_temp
 
 `stage.raw_orders` is a flat landing table representing the current load batch. Keeping the Stage layer flat minimizes transformation at ingestion and preserves the source batch before normalization.
 
-`stage.rfm_temp` stores the Stage 1 RFM result and is intentionally preserved when `stage.raw_orders` is reset for the delta batch.
+`stage.rfm_temp` stores the Stage 1 RFM result and is intentionally preserved when `stage.raw_orders` is reset for the delta batch. The Stage landing table includes the four additional geolocation CSV fields; its column order must match the generated CSV files when using PostgreSQL `COPY`.
 
 ## Core layer — 3NF
 
@@ -338,6 +345,8 @@ customer_unique_id
 customer_zip_code_prefix
 customer_city
 customer_state
+geolocation_lat
+geolocation_lng
 valid_from
 valid_to
 is_current
@@ -365,7 +374,9 @@ The final current version ends at:
 9999-12-31 23:59:59
 ```
 
-A partial unique index ensures only one current version exists for each `customer_unique_id`. In addition to natural address changes present in the source data, the simulated delta manually changes the location of 10 existing customers to `RJ / rio de janeiro / 20000`. This provides explicit SCD2 test cases: the previous version is closed by setting its `valid_to` and `is_current = FALSE`, while the new location becomes the current version.
+A partial unique index ensures only one current version exists for each `customer_unique_id`. In addition to natural address changes, the simulated delta manually changes 10 existing customers to `RJ / rio de janeiro / 20010`. The matching coordinates are stored on the new version; the previous version is closed by updating `valid_to` and `is_current = FALSE`. The SCD2 change detection is based on ZIP prefix, city and state; coordinates are carried as attributes of each version.
+
+A post-load check confirmed an example transition from `SC / florianopolis / 88058` to `RJ / rio de janeiro / 20010`, with contiguous validity periods and one current version.
 
 `core.orders` keeps `customer_unique_id` rather than a physical foreign key to one customer version. The correct `customer_sk` is resolved later by the temporal join when the fact table is loaded.
 
@@ -412,9 +423,12 @@ mart.dim_customer
 mart.dim_product
 mart.dim_seller
 mart.dim_date
+mart.dim_security
 ```
 
-`mart.dim_seller` intentionally contains only `seller_id` in the current implementation because the Stage 2 pipeline carries only the seller identifier into the warehouse. The dimension is kept as a separate star-schema entity and can be enriched with additional seller attributes in a future extension.
+`mart.dim_seller` intentionally contains only `seller_id` in the current implementation because the Stage 2 pipeline carries only the seller identifier into the warehouse. The dimension is kept as a separate star-schema entity and can be enriched in a future extension.
+
+`mart.dim_security` is an **independent access-control mapping table**, not a transactional star-schema dimension linked by a foreign key. It stores a user identifier, access role and permitted state; Power BI's RLS expression uses this mapping to filter `mart.dim_customer`, with the customer-to-fact relationship propagating the security filter. The warehouse security table contains five configured users.
 
 ### Fact table
 
@@ -476,6 +490,8 @@ The load uses a temporal `LEFT JOIN` and then explicitly raises an exception if 
 
 ```text
 customer_region
+geolocation_lat
+geolocation_lng
 recency
 frequency
 monetary
@@ -483,12 +499,14 @@ r_score
 f_score
 m_score
 segment
+current_rfm_segment
 ```
 
-RFM values are populated only on the **current SCD2 customer version**. Historical versions retain their location history without duplicating a stale RFM snapshot.
+The **`segment` and core RFM scores** remain populated on the current SCD2 version for behavioral reporting. The new SQL-derived **`current_rfm_segment`** is intentionally available on **all customer SCD2 versions** to support report filtering and historical order joins without an expensive Power BI calculated column. It represents the customer's *current* RFM classification, **not** the segment at each historical purchase date.
 
-Customers not eligible for RFM intentionally retain `NULL` RFM attributes and `NULL` segment in `mart.dim_customer`. The final segmentation covers **94,983 of 95,420** unique source customers. The other **437** are excluded by purchase-status eligibility (431 canceled-only and 6 unavailable-only), not by delivery completion or product weight.
+Customers not eligible for RFM retain `NULL` segment attributes. The final segmentation covers **94,983 of 95,420** unique source customers. The other **437** are excluded by purchase-status eligibility (431 canceled-only and 6 unavailable-only), not by delivery completion or product weight. Source-to-Mart `current_rfm_segment` comparison yielded **zero mismatches** across all customer versions.
 
+The Mart also carries customer geolocation (`geolocation_lat`, `geolocation_lng`) from Core for use in Power BI map visuals.
 
 Brazilian states are grouped into:
 
@@ -528,6 +546,8 @@ For existing fact rows, only mutable reporting attributes are updated. The histo
 
 # SQL Files
 
+The repository-friendly names are shown below. The current uploaded versions have revision suffixes, for example `stage_create(6).sql`, `core_create(6).sql`, `mart_create(6).sql`, `data_to_stage(4).sql`, `data_to_core(6).sql`, `data_to_mart(4).sql`, `reset_stage(4).sql`, `delta_load(4).sql` and `checks(2).sql`. Rename the supplied revision files to the canonical names if preparing a clean repository.
+
 ```text
 stage_create.sql
 data_to_stage.sql
@@ -535,6 +555,7 @@ core_create.sql
 data_to_core.sql
 mart_create.sql
 data_to_mart.sql
+data_to_security.sql
 reset_stage.sql
 delta_load.sql
 checks.sql
@@ -546,11 +567,12 @@ Responsibilities:
 - `data_to_stage.sql` — truncates `stage.raw_orders` and `stage.rfm_temp` **and executes the two initial CSV `COPY` commands** (the files must already be accessible to PostgreSQL).
 - `core_create.sql` — creates the normalized Core model, constraints and indexes.
 - `data_to_core.sql` — performs the initial Stage-to-Core load and builds initial SCD2 history.
-- `mart_create.sql` — creates the reporting Star Schema.
-- `data_to_mart.sql` — loads / upserts dimensions and fact data, resolves the temporal customer key and calculates reporting fields.
-- `reset_stage.sql` — truncates only `stage.raw_orders` before the simulated delta load; `stage.rfm_temp` is retained.
+- `mart_create.sql` — creates the reporting Star Schema, including the independent `mart.dim_security` table.
+- `data_to_mart.sql` — loads / upserts dimensions and fact data, resolves temporal customer keys, carries geolocation and populates SQL-derived `current_rfm_segment`.
+- `data_to_security.sql` — populates the five Power BI RLS user mappings after the Mart tables are created; run it only once per fresh warehouse rebuild unless the script is made idempotent.
+- `reset_stage.sql` — truncates only `stage.raw_orders` **and imports `/delta_load.csv` using `COPY`**; `stage.rfm_temp` is retained. Do not run another manual delta `COPY` after this script.
 - `delta_load.sql` — performs the incremental Core load, including new records, SCD1, SCD2 and duplicate-safe processing.
-- `checks.sql` — contains validation queries for row counts, duplicate detection, orphan keys, SCD behavior, RFM coverage and revenue reconciliation.
+- `checks.sql` — validates row counts, duplicates, orphan keys, SCD behavior, RFM coverage, revenue reconciliation, geolocation coverage/consistency and security-table contents.
 
 CSV files are loaded into Stage using PostgreSQL `COPY`, with paths appropriate for the database server environment.
 
@@ -565,6 +587,7 @@ For a fresh database, copy the generated initial and RFM CSVs to the PostgreSQL 
 4. data_to_core.sql
 5. mart_create.sql
 6. data_to_mart.sql
+7. data_to_security.sql    -- populate the warehouse RLS mapping once
 ```
 
 The supplied `data_to_stage.sql` already contains:
@@ -588,29 +611,18 @@ CSV HEADER;
 
 ## Delta load order
 
-After the initial load:
+After the initial Mart load, verify that `/delta_load.csv` is available inside the PostgreSQL container, then run:
 
 ```text
-1. reset_stage.sql
-2. load delta_load.csv into stage.raw_orders
-3. delta_load.sql
-4. data_to_mart.sql
+1. reset_stage.sql        -- TRUNCATE stage.raw_orders + COPY /delta_load.csv
+2. delta_load.sql         -- incrementally update the Core layer
+3. data_to_mart.sql       -- refresh Mart dimensions and facts
+4. checks.sql             -- run quality and reconciliation checks
 ```
 
-`reset_stage.sql` clears only the current raw Stage batch. Load the simulated delta with:
+**Important:** in the submitted `reset_stage(4).sql`, the delta `COPY` is **already included**, immediately after the Stage reset. Do **not** load `delta_load.csv` manually a second time. The script preserves `stage.rfm_temp` for RFM enrichment. PostgreSQL `COPY` reads from the database-server filesystem; adjust `/delta_load.csv` in the script only if your container path differs.
 
-```sql
-COPY stage.raw_orders
-FROM '/delta_load.csv'
-DELIMITER ','
-CSV HEADER;
-```
-
-The path shown above is an example and can be changed according to the PostgreSQL server environment.
-
-`stage.rfm_temp` remains available for customer enrichment.
-
-Re-running the same delta is designed not to create duplicate transaction rows or duplicate customer versions.
+The incremental load uses natural keys, constraints and upsert logic to avoid duplicate transactional rows and customer versions.
 
 ---
 
@@ -644,12 +656,14 @@ PostgreSQL `COPY` reads files from the database-server filesystem, so the path u
 
 Stage 3 delivers the Power BI semantic model, strategic and operational dashboards, documented BI requirements, low-fidelity wireframes, data storytelling and SQL-to-Power-BI validation evidence.
 
-Main files:
+Main files (uploaded versions):
 
 ```text
-stage3.ipynb
-Innowise_Project_Stage3.pbix
+stage3(3).ipynb
+Innowise_Project_Stage3_final_ver2910_final.pbit
 ```
+
+The editable `.pbix` is produced by opening the template and saving the refreshed report in Power BI Desktop; the uploaded `.pbit` itself does not contain imported model data.
 
 Supporting Stage 3 evidence:
 
@@ -663,7 +677,7 @@ TotalOrdersSQL.png      # Total Orders validation
 DelayedOrdersSQL.png    # Total Delayed Orders validation
 ```
 
-`stage3.ipynb` contains requirement gathering, the Business Requirements Document (BRD), wireframing notes, data storytelling and validation documentation. The `.pbix` file contains the implemented Power BI report.
+`stage3.ipynb` contains requirement gathering, the updated Business Requirements Document (BRD), initial wireframing notes, data storytelling and validation documentation. The revised notebook was supplied as `stage3(3).ipynb`. The `.pbit` contains the model and report definition; a refreshed `.pbix` contains the locally imported data.
 
 ## Requirement Gathering
 
@@ -686,14 +700,14 @@ The notebook also explains why placing all metrics on one screen reduces usabili
 
 ## Business Requirements Document
 
-The BI solution provides two complementary reporting experiences.
+The BI solution provides two complementary reporting experiences. The revised BRD in `stage3(3).ipynb` covers the current four-page report, its SQL-based RFM and RLS implementation, dynamic metrics, connectivity parameters, date model and the remaining delivery limitations.
 
 ### Executive Director
 
 The strategic dashboard is designed to monitor:
 
 - overall sales performance,
-- revenue growth and YoY change,
+- revenue trends and month-over-month performance,
 - geographical performance,
 - product-category performance,
 - customer value and RFM segmentation.
@@ -710,18 +724,18 @@ The operational dashboard is designed to monitor:
 
 ### Key metrics and definitions
 
-The principal Stage 3 measures use the Mart model. Unless stated otherwise, dashboard-wide sales measures **exclude `canceled` orders**; the warehouse retains these transactions for auditability.
+The principal Stage 3 measures use the Mart model. A report-level order-status filter excludes `canceled` orders, and the core Revenue and Orders measures additionally enforce that exclusion. Other measures follow their own filter context and eligibility rules. The warehouse retains canceled transactions for auditability.
 
 - **Total Revenue** — product price plus freight for non-canceled orders, calculated from `mart.fact_sales[total_value]`.
 
 - **Total Orders** — distinct non-canceled `order_id`, returning zero instead of blank when there are no qualifying orders.
 
 - **Average Order Value (AOV)** — Total Revenue / Total Orders.
-- **Total Customers** — distinct customers in the applicable non-canceled reporting context.
+- **Total Customers** — distinct purchasing customers represented by the fact rows in the active report, page and slicer filter context.
 - **Orders per Customer** — Total Orders / Total Customers.
 - **Revenue per Customer** — Total Revenue / Total Customers.
-- **Month-over-Month Change (%)** — compares the latest completed reporting month with the preceding month; avoids comparing an incomplete September 2018 with August 2018.
-- **Average Freight** — average freight per relevant fact row.
+- **MoM Growth %** — compares the latest completed reporting month with the preceding month for the selected metric; avoids comparing an incomplete September 2018 with August 2018.
+- **Average Freight** — mean total freight per distinct order in the selected context, rather than a simple order-item-row average.
 - **Total Delayed Orders** — distinct non-canceled orders where `delayed_flag = 1`.
 - **Average Delivery Days** — duration measured per order, not per order item.
 - **Average Delay Days** — mean days beyond the expected delivery date for delayed orders.
@@ -730,7 +744,7 @@ The principal Stage 3 measures use the Mart model. Unless stated otherwise, dash
 - **% On-Time Delivery** — on-time orders / SLA Eligible Orders.
 - **Regional Revenue Share %** — selected geographical revenue relative to total revenue within the user's effective RLS scope.
 
-Prior-year comparison and `SAMEPERIODLASTYEAR()` are discussed in the Stage 3 BI requirements / DAX context; the final KPI Overview emphasizes **MoM Change (%)**, not a YoY card.
+The revised Stage 3 BRD documents the implemented **MoM Growth %** analysis. Previous-year and YoY measures were removed from the final semantic model, so they are not presented as implemented features.
 
 ### Delivery SLA definition
 
@@ -748,7 +762,7 @@ delay_days = actual delivery date - estimated delivery date
 
 ### RFM segmentation
 
-RFM is calculated in Python at `customer_unique_id` level for eligible order statuses (`approved`, `invoiced`, `processing`, `shipped`, `delivered`) and loaded into the current Mart customer version. It uses:
+RFM is calculated in Python at `customer_unique_id` level for eligible order statuses (`approved`, `invoiced`, `processing`, `shipped`, `delivered`) and imported into the warehouse for customer-dimension enrichment. It uses:
 
 - **Recency** — days since the latest purchase,
 - **Frequency** — number of unique orders,
@@ -784,11 +798,11 @@ The report contains four main business pages.
 
 The report also contains supporting tooltip pages, an `Order_Details` drill-through page and methodology / FAQ content. Supporting pages are not counted as main dashboard pages.
 
-The experience supports navigation buttons and shared report filters. Customer State, City, Product Category and Current RFM Segment slicers are arranged together above the KPI cards. Date-range filtering is also provided. Contextual information icons explain non-obvious KPI and visualization definitions.
+The experience supports navigation buttons and shared report filters, with business-friendly slicer labels and dynamic titles. The KPI Overview's Select Metric control switches Revenue, Orders and AOV. Customer State, City, Product Category and RFM Segment slicers are arranged above the KPI cards. Contextual information icons or existing report tooltips explain non-obvious KPI and chart definitions.
 
-The geographical page provides **State -> City** drill-down, a dynamic location chart title based on the selected metric (Revenue, Orders, AOV), and supporting state-level analysis.
+Geographic Sales Analysis supports **Region -> State -> City** drill-down on the location bar chart and a dynamic title based on Revenue, Orders or AOV. The map uses customer latitude/longitude in addition to location fields.
 
-The Delivery Performance page shows delivery-time distribution, geographical delivery issues and a combined order-volume / delayed-rate trend.
+Delivery Performance shows delivery-time distribution, geographical delivery issues, a combined order-volume/delay-rate trend and an **Order Status** slicer. Each main report page retains four KPI cards.
 
 ---
 
@@ -796,40 +810,41 @@ The Delivery Performance page shows delivery-time distribution, geographical del
 
 ### Dynamic Row-Level Security
 
-The report's dynamic-security design uses the `Dynamic_Security` role and a security mapping table in the Power BI model (referred to as `mart dim_security` in the model). The signed-in user is identified using `USERPRINCIPALNAME()`; regional-manager users are restricted to assigned customer states, while Director access spans all states.
+The `Dynamic_Security` role reads its user-to-state mapping from the **physical PostgreSQL table `mart.dim_security`**, which has replaced the former hard-coded Power BI table. Power BI imports it as `mart dim_security` and evaluates the signed-in identity using `USERPRINCIPALNAME()`.
 
-**Deployment note:** the security mapping was maintained in the Power BI model in this project iteration. It should not be confused with a verified physical `mart.dim_security` table in PostgreSQL. For a production deployment, this mapping would need a governed warehouse or identity-management source, and any redundant test roles should be reviewed before publishing.
+The security table is intentionally **disconnected** from the star-schema relationships. The RLS filter is applied on `mart dim_customer`, allowing the existing customer-to-sales relationship to propagate state restrictions. Manager users can be assigned one state or `ALL`; Director users with `ALL` access can view all states. Users absent from the mapping are denied access to protected customer/fact data. The revised role was saved and tested interactively in Power BI Desktop.
+
+**Deployment note:** Power BI Service user identities and role membership must also be verified before external sharing. The five entries are development/test mappings rather than a production identity-management integration.
 
 ### Advanced DAX
 
-The report includes the required advanced DAX patterns:
+The report uses reusable DAX measures, dynamic metric-selection titles, context-aware revenue shares (respecting RLS) and time-based reporting through the active order-date relationship with `mart.dim_date`. Unused prior-year, YTD, duplicate share and other legacy measures were removed after reviewing their report dependencies.
 
-- `SUMX` for row-by-row Total Revenue calculation,
-- `REMOVEFILTERS` for revenue-share / total-context calculations while respecting RLS,
-- a prior-year comparison pattern with `SAMEPERIODLASTYEAR` documented in the BI analytical work (the KPI Overview itself presents MoM Change),
-- time intelligence through the active order-date relationship with `mart.dim_date`.
+`Current RFM Segment` is **no longer calculated row by row in DAX**; the model uses the `current_rfm_segment` field imported from SQL.
 
-The date dimension is marked as the model's Date Table.
+The warehouse date dimension provides the reporting calendar. **Auto date/time is disabled for the current Power BI file**, so the report relies on `mart.dim_date` rather than automatic hidden date tables.
 
 ### Data model and performance
 
-Power BI uses the Mart Star Schema as the reporting semantic model.
+Power BI uses the Mart Star Schema as the reporting semantic model. Connection details are configurable via Power Query parameters **`pServer`** and **`pDatabase`**, replacing a hard-coded `localhost` connection in the Mart queries.
+
+Five order-related date keys are retained in `mart.fact_sales`. The order-date relationship is active; the **four alternate date relationships are currently inactive** and have not yet been activated through dedicated measures. They are documented as a pending use-or-remove cleanup item rather than presented as completed.
 
 Target refresh frequency is daily; in the local project environment, SQL and Power BI refreshes can be executed manually.
 
-The model uses an optimized star-schema structure and reusable DAX measures, with a target page load time below 3 seconds.
+The model uses a Star Schema and reusable DAX measures to support responsive report interactions. No measured page-load-time benchmark is claimed.
 
 ---
 
 ## Power BI Report
 
-Main report file:
+Final report template reviewed for this README:
 
 ```text
-Innowise_Project_Stage3.pbix
+Innowise_Project_Stage3_final_ver2910_final.pbit
 ```
 
-Power BI connects to the reporting-ready Mart layer.
+Power BI connects to the reporting-ready Mart layer. Open and refresh the template to save a `.pbix` with locally imported data.
 
 ### KPI Overview
 
@@ -837,42 +852,46 @@ Strategic overview containing:
 
 - Total Revenue, Total Orders and Average Order Value,
 - **Month-over-Month Change (%)** based on completed months,
-- Monthly Trend with a Revenue / Total Orders / AOV metric selector,
-- a state-level Total Orders table with data bars,
+- Monthly Trend with a Revenue / Total Orders / AOV selector and readable `MMM yyyy` month labels,
+- a **Top 10 customer states + Others** table with data bars, responsive values and a dynamic state-table title,
 - shared business filters and date-range filtering.
 
-The partial **September 2018** (data only through September 3) is excluded from monthly trend presentation using a **visual-level date cutoff of August 31, 2018**, so it does not create a misleading apparent monthly collapse. Global report data and other KPI contexts retain their normal date coverage.
+The Monthly Trend uses a **visual-level start date of February 1, 2017** to avoid emphasizing the unusually low-volume early months of 2016. The partial **September 2018** (data only through September 3) is also excluded from monthly trend presentation with a visual-level end cutoff of August 31, 2018. Neither cutoff changes global KPI totals. The Top 10 table is a single visual; **Others is included but sorts by its value rather than remaining permanently last** to avoid an extra visible sorting column and horizontal scrolling.
 
 ### Geographic Sales Analysis
 
 Geographical and categorical analysis containing:
 
-- **Selected Metric by Location** with **State -> City** drill-down,
+- **Selected Metric by Location** with drill-down through **Region -> State -> City**; the submitted `.pbit` still also includes **Country as the first drill level**,
 - dynamic visual title: **Revenue by Location / Orders by Location / AOV by Location**,
-- **Top 5 Categories by Revenue**,
+- geographic map using **average customer latitude/longitude** from the warehouse, plus state/city fields,
+- **Top 5 Categories by Revenue** (misleading subtotal row removed),
 - supporting state-level metric visualization.
 
-The geography analysis focuses on Brazil and includes a fallback state view for locations where map visuals are unavailable. Operational context, including the on-time delivery KPI, uses an **illustrative** color convention (green >= 95%, amber >= 90% and < 95%, red < 90%); these thresholds are not an official published Olist SLA.
+The geography analysis focuses on Brazil and includes a fallback state view for locations where the map is unavailable. The current chart retains `Country` above `customer_region`; it can be removed from the axis later if the drill-down is intended to start immediately at Region. The location bar chart currently retains its working drill-down rather than adding an `Others` group; **Top 10 + Others remains pending on this visual**. Map display still needs validation in Power BI Service, and four customer coordinates outside the expected Brazil region need correction in the ETL. Operational context, including the on-time delivery KPI, uses an **illustrative** color convention (green >= 95%, amber >= 90% and < 95%, red < 90%); these thresholds are not an official published Olist SLA.
 
 ### Customer Segmentation RFM
 
 Customer segmentation analysis containing:
 
 - **Total Customers**, **AOV**, **Orders / Customer**, **Revenue per Customer** KPI cards,
-- **RFM Segment Value** metric-switching chart (Total Revenue or Revenue per Customer),
-- **Customers by RFM Segment** donut chart showing the five real segment names and proportions,
-- behavioral segment table with **Total Customers**, **Avg Recency (Days)**, **Orders / Customer**, and **AOV**.
+- **RFM Segment Value** metric-switching chart (Total Revenue or Revenue per Customer), with a dynamic title,
+- **Customers by RFM Segment** horizontal bar chart with consistent segment colors and data labels, making the small Champion group (143 customers) visible,
+- **RFM Customer Behavior** table with a title and Total row, showing **Avg Recency (Days)**, **Orders / Customer**, **AOV**, and **Avg RFM Monetary**. The extra Monetary measure is present in the submitted final `.pbit`; the table does not repeat Total Customers from the segment-count chart.
 
-RFM charts and the segment table filter out `NULL` segment values **at the visual level**, not at page level. This keeps the global customer KPI intact. For the full non-canceled report scope, **94,989** customers appear in the global KPI, while **94,983** appear in the five RFM segments; the difference is **6 unavailable-only customers** without an eligible RFM status. The 431 canceled-only source customers are excluded from the non-canceled KPI scope.
+The submitted `.pbit` applies a **page-level filter** excluding `NULL` `current_rfm_segment` values on Customer Segmentation RFM. This affects the KPI cards on that page as well as its segment visuals. Under the unfiltered state/date selection, **94,983** customers have one of the five RFM segments. Across the wider non-canceled report scope, **94,989** customers have visible orders: the additional **6** have unavailable-only orders and therefore lack an eligible RFM segment. The **431** canceled-only customers are excluded by the report-level order-status filter. The full original source population is **95,420** unique customers.
 
 ### Delivery Performance
 
 Operational delivery monitoring containing:
 
-- **Total Delayed Orders**, **% On-Time Delivery**, **Avg Delay Days**, **Delayed Order Rate %**,
-- **Delayed Orders by State**,
+- four KPI cards: **Total Delayed Orders**, **% On-Time Delivery**, **Avg Delay Days** and **Avg Delivery Days**,
+- **Delayed Order Rate by State**,
 - **Delivery Time Distribution** with data labels,
-- **Order Volume vs Delay Rate** (order counts and delayed-order-rate line).
+- **Order Volume vs Delay Rate** (order counts and delayed-order-rate line),
+- an **Order Status** slicer and business-oriented order-date/axis labels.
+
+Numeric formats were refined, including two decimals for Avg Delay Days (for example 10.62), two decimals for Avg Delivery Days (for example 12.50) and a readable thousands separator for delayed order counts. The delayed-rate metric remains available in the report even though its redundant top-row KPI card was replaced by Avg Delivery Days.
 
 The delayed-rate line uses a separate chart measure to suppress percentages based on fewer than **100 SLA-eligible orders** in a month. This avoids misleading values such as the original 100% rate for September 2016, which had only two eligible orders. Order-volume bars are not suppressed by this rule, and zero-order months can remain on the time axis.
 
@@ -891,7 +910,7 @@ Dashboard3.png — Director dashboard #3: RFM Segmentation
 Dashboard4.png — Operations Manager dashboard
 ```
 
-The wireframes define the initial placement of KPI cards, filters, navigation and main/supporting visuals. They intentionally use simple boxes and placeholder labels rather than final styling.
+The wireframes define the **initial** placement of KPI cards, filters, navigation and main/supporting visuals. They intentionally use simple boxes and placeholder labels rather than final styling. The original **Map / Drill-down** concept became **Geographic Sales Analysis**, and **Operations Dashboard** became **Delivery Performance**; historical wireframe labels do not indicate additional final report pages.
 
 ---
 
@@ -909,7 +928,7 @@ The Regulars segment contains the largest number of customers and generates the 
 
 ### Pattern 2 — Delivery delays show visible peaks during periods of higher activity
 
-The delivery-time distribution has its largest group in the **6–10 day** bucket. Delayed-order-rate patterns show noticeable peaks during late 2017 and early 2018; the report now suppresses monthly percentages for periods with fewer than 100 SLA-eligible orders to avoid drawing conclusions from a very small sample.
+The delivery-time distribution has its largest group in the **6–10 day** bucket. In the reference report context, the delayed-order rate is approximately **6.77%**. Delayed-order-rate patterns show noticeable peaks during late 2017 and early 2018; the report suppresses monthly percentages for periods with fewer than 100 SLA-eligible orders to avoid drawing conclusions from a very small sample.
 
 **Hypothesis:** periods with higher order activity may put additional pressure on fulfillment and logistics capacity, contributing to more delayed deliveries.
 
@@ -969,8 +988,14 @@ The rebuilt warehouse and refreshed RFM enrichment were checked after the simula
 | RFM source-to-current-Mart segment mismatches | **0** |
 | Fact / dimension orphan-key checks | **0** |
 | Duplicate order-item / current-customer-version checks | **0** |
+| Current customers with both geolocation coordinates | **95,156 / 95,420 (99.72%)** |
+| Current customers without coordinates | **264** |
+| Core-to-Mart coordinate mismatches | **0** |
+| Invalid global latitude/longitude or half-null coordinate pairs | **0** |
+| Current customers with coordinates outside the approximate Brazil bounds | **4** |
+| Warehouse security mappings | **5** |
 
-The RFM source-to-Mart validation joins by `customer_unique_id` and `is_current = TRUE`. All five segments matched exactly, with no missing or mismatched current customer assignments.
+The validation compares the SQL-derived `current_rfm_segment` with the Python-produced RFM segment across **all Mart SCD2 customer versions** by `customer_unique_id`; it returned zero mismatches. The current customer population is 95,420 and the five segments sum to 94,983.
 
 An additional full-status Mart reconciliation verified `SUM(price + freight_value)` = **R$ 15,843,553.24** without a difference; this is distinct from the non-canceled Power BI Total Revenue result of **R$ 15,737,887.53**. Both values are valid for their respective order-status populations.
 
@@ -997,6 +1022,7 @@ Project/
 |   |   |-- data_to_core.sql
 |   |   |-- mart_create.sql
 |   |   |-- data_to_mart.sql
+|   |   |-- data_to_security.sql
 |   |   |-- reset_stage.sql
 |   |   |-- delta_load.sql
 |   |   `-- checks.sql
@@ -1011,7 +1037,8 @@ Project/
 |
 |-- Stage 3/
 |   |-- stage3.ipynb
-|   |-- Innowise_Project_Stage3.pbix
+|   |-- Innowise_Project_Stage3.pbit
+|   |-- Innowise_Project_Stage3.pbix    (saved locally after refresh, if distributed)
 |   |-- Dashboard1.png
 |   |-- Dashboard2.png
 |   |-- Dashboard3.png
@@ -1043,13 +1070,13 @@ This produces the cleaned reference dataset, Sweetviz report and RFM segmentatio
 
 ## 3. Run Stage 2 notebook
 
-Execute:
+Execute the Stage 2 notebook (uploaded as `stage2(3).ipynb`; it can be renamed `stage2.ipynb` for the repository):
 
 ```text
 stage2.ipynb
 ```
 
-This creates:
+The notebook merges the transactional sources with the Olist geolocation data and creates:
 
 ```text
 initial_load.csv
@@ -1080,36 +1107,24 @@ data_to_core.sql
 mart_create.sql
     ↓
 data_to_mart.sql
+    ↓
+data_to_security.sql  (populate the five RLS mappings once)
 ```
 
 `data_to_stage.sql` already executes the CSV imports. Its `COPY` file paths assume `/initial_load.csv` and `/olist_rfm_segmentation.csv` exist on the database server/container. **Do not import the same files twice.**
 
 ## 6. Process the simulated incremental load
 
-Run:
+Run the following scripts in order, **without manually importing the delta CSV between steps**:
 
 ```text
-reset_stage.sql
-```
-
-Load the simulated delta:
-
-```sql
-COPY stage.raw_orders
-FROM '/delta_load.csv'
-DELIMITER ','
-CSV HEADER;
-```
-
-Then run:
-
-```text
+reset_stage.sql        (includes COPY of /delta_load.csv)
 delta_load.sql
 data_to_mart.sql
 checks.sql
 ```
 
-`checks.sql` validates the final warehouse using row-count, duplicate, orphan-key, SCD, RFM-coverage and revenue-reconciliation checks. A separate RFM source-to-Mart comparison confirmed zero mismatches across all five segments.
+The provided `reset_stage(4).sql` both resets `stage.raw_orders` and loads the delta file. Running another `COPY` would duplicate the Stage batch. `checks.sql` validates row counts, duplicate and orphan-key checks, SCD behavior, RFM reconciliation, revenue totals, geolocation and security mappings.
 
 ## 7. Review Stage 3 requirements
 
@@ -1123,13 +1138,25 @@ This notebook contains the requirement-gathering principles, stakeholder intervi
 
 ## 8. Open Power BI
 
-Open:
+The uploaded final Power BI artifact is a template:
 
 ```text
-Innowise_Project_Stage3.pbix
+Innowise_Project_Stage3_final_ver2910_final.pbit
 ```
 
-and connect / refresh against the PostgreSQL Mart layer if required by the local environment. Review the PostgreSQL server/database connection settings, the loaded security mapping and the `Dynamic_Security` role before sharing the report. The available data extends to **2018-09-03**; the monthly charts exclude the incomplete September 2018 as described above.
+Open the `.pbit` in Power BI Desktop and supply the PostgreSQL connection parameters `pServer` (server name, for example `localhost`) and `pDatabase` (for example `olist_dwh`). A Power BI template holds the semantic model and report definition but **does not include imported data**. Refresh the Mart tables with PostgreSQL running, verify the `Dynamic_Security` role and save a local `.pbix` if an interactive report with imported data is needed. The available source dates extend to **2018-09-03**; selected monthly visuals exclude the incomplete September 2018 as described above.
+
+---
+
+# Outstanding Items
+
+The following items were deliberately left open; they are **not** described as completed work:
+
+1. **Geolocation quality:** four current customers (three ZIP prefixes: `46560` / BA, `68275` / PA and `83252` / PR) have coordinates outside approximate Brazil bounds despite having Brazilian addresses. The next ETL revision should reject or correct out-of-country geolocation outliers before ZIP/state aggregation, then regenerate and reload the affected warehouse data. The global coordinate-validity check returned zero invalid values, but that check cannot detect geographically misplaced yet numerically valid coordinates; the separate Brazil-bounds check identified these four exceptions. This correction has **not** been applied yet.
+2. **Power BI map validation:** the map uses PostgreSQL latitude/longitude, but the outlier points still need to be fixed and map rendering verified in **Power BI Service** before the next demo. Desktop output alone is not sufficient confirmation.
+3. **Inactive date relationships:** the four alternate date relationships (approval, carrier handoff, customer delivery, estimated delivery) are currently unused in measures with `USERELATIONSHIP()`. They have been retained for potential milestone-date analysis, but must eventually be used or removed.
+4. **Geographic location bar chart:** Region -> State -> City drill-down works. Its Top 10 + Others grouping has **not** been implemented so that the working hierarchy and presentation were not disturbed. The KPI Overview **does** show Top 10 + Others, with the documented value-sort limitation for the Others row.
+5. **Notebook version synchronization:** the originally uploaded `stage1(9).ipynb` predates the Stage 1 Markdown corrections made during the documentation review; make sure the edited notebook is saved as the final `stage1.ipynb` before submission. The uploaded `stage3(3).ipynb` contains the revised BRD without obsolete YoY requirements. Its wireframe note still uses the original design names (Map / Drill-down and Operations Dashboard), which are correctly distinguished from the final report pages in this README.
 
 ---
 
