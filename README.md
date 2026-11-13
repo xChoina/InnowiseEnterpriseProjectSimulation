@@ -722,7 +722,7 @@ The operational dashboard is designed to monitor:
 
 ### Key metrics and definitions
 
-The principal Stage 3 measures use the PostgreSQL Mart Star Schema. The warehouse retains all statuses, including canceled transactions, for data completeness and auditability. The former report-level `order_status <> 'canceled'` filter has been removed. Core sales, customer and delivery measures now **explicitly exclude canceled orders in DAX** rather than relying on a global page/report filter; supporting measures still require a final regression check under cross-filters.
+The principal Stage 3 measures use the PostgreSQL Mart Star Schema. The warehouse retains all statuses, including canceled transactions, for data completeness and auditability. The former report-level `order_status <> 'canceled'` filter has been removed. Core sales, customer and delivery measures now **explicitly exclude canceled orders in DAX** rather than relying on a global page/report filter; the KPI definitions are documented with their relevant filter contexts.
 
 - **Total Revenue** — sum of product price plus freight for non-canceled orders, based on `mart.fact_sales[total_value]`.
 - **Total Orders** — distinct non-canceled `order_id`; distinct counting avoids double-counting multi-item orders.
@@ -730,7 +730,7 @@ The principal Stage 3 measures use the PostgreSQL Mart Star Schema. The warehous
 - **Total Customers** — distinct purchasing customer identities represented by qualifying non-canceled fact rows within the applicable filter context.
 - **Orders per Customer** — Total Orders / Total Customers.
 - **Revenue per Customer** — Total Revenue / Total Customers.
-- **MoM Growth %** — change between completed reporting months for the selected performance metric, avoiding comparison with incomplete September 2018.
+- **MoM Growth %** — change between completed reporting months for the selected performance metric, avoiding comparison with incomplete September 2018. At the reference reporting end date of September 3, 2018, the displayed **−4.12%** compares **August 2018 vs July 2018**; a dynamic comparison-period label displays the applicable months.
 - **Average Freight** — mean total freight per distinct qualifying order, not a simple average across order-item rows.
 - **Total Delayed Orders** — distinct non-canceled orders with `delayed_flag = 1`.
 - **Average Delivery Days** — actual delivery duration averaged at order level.
@@ -751,6 +751,8 @@ An order is:
 - **On-Time** when actual delivery date <= estimated delivery date,
 - **Delayed** when actual delivery date > estimated delivery date,
 - **SLA-eligible** only when both actual and estimated delivery dates are available.
+
+**SLA eligibility validation (current full warehouse history):** of **96,478** orders with `delivered` status, **96,470** are SLA-eligible. The remaining **8** lack an actual customer delivery date; none of the delivered-status orders lack an estimated delivery date. Across all non-canceled statuses, **1,735** orders lack an actual customer delivery date (including these eight). Incomplete delivery records are excluded from the on-time and delayed-rate denominators because their timeliness cannot be established. These are full-history figures, not figures for the narrower dashboard date slicer.
 
 ```text
 delivery_days = actual delivery date - order purchase date
@@ -780,7 +782,7 @@ The five RFM segments contain **94,983** customers. Another 437 customers are no
 
 For the RFM comparison chart, **Customer Share %** is the segment's purchasing customers divided by customers across the five eligible segments; **Revenue Share %** is the corresponding segment revenue divided by revenue across the five segments. The denominators remove the segment context while retaining applicable date and business selections. RFM Monetary sums product price only; Stage 3 Revenue includes freight. Both measures refer to the SQL-derived **current**, not historical-as-of-order, RFM classification.
 
-**RFM filter scope:** the page-level filter excludes blank `current_rfm_segment` values by design, so the page focuses on customers assigned to one of the five RFM segments. Its KPI cards and segment visuals use that consistent population.
+**RFM filter scope:** the page-level filter excludes blank `current_rfm_segment` values by design, so the page focuses on customers assigned to one of the five RFM segments. Its KPI cards and segment visuals use that consistent population. Across the full history, **94,983** customers have an eligible segment versus **94,989** non-canceled purchasing customers (a six-customer difference). A previously observed **~93.98K** RFM card used a narrower purchase-date range; extending it to include earlier purchases increased the displayed count to **~94.98K**. Compare page KPIs only under matching date and business filters.
 
 ---
 
@@ -792,7 +794,7 @@ The report contains four primary business pages, each with four KPI cards and su
 
 1. **KPI Overview** — Total Revenue, Total Orders, AOV and MoM Change; dynamic monthly Revenue / Orders / AOV trend; dynamic **Top 10 Customer States** by the selected metric, **without Others**, with order-detail drill-through.
 2. **Geographic Sales Analysis** — Total Revenue, Total Orders, Average Freight and % On-Time Delivery; a Brazil map using customer coordinates, Region → State → City analysis, Revenue / Orders / AOV selection, Top 5 product categories and a contextual state tooltip including **Top City by Orders**.
-3. **Customer Segmentation RFM** — Total Customers, AOV, Orders per Customer and Revenue per Customer; **Customers by RFM Segment**, **Customer Share % vs Revenue Share %** and an RFM Customer Behavior table.
+3. **Customer Segmentation RFM** — Total Customers, AOV, Orders per Customer and Revenue per Customer; **Customers by RFM Segment**, **Customer Share % vs Revenue Share %** and an RFM Customer Behavior table showing **Total Revenue** alongside behavioral metrics, with an **Overall** row.
 
 ### Operational dashboard — Operations Manager
 
@@ -802,7 +804,7 @@ The report contains four primary business pages, each with four KPI cards and su
 
 The report has a consistent left-side page navigator, Order Date range selection, shared **Customer State**, **City**, **Product Category** and **RFM Segment** slicers, page-specific Reset bookmarks, dynamic titles and contextual Help/tooltip features. Filter selections are synchronized across the four main business pages. KPI Overview includes a Revenue / Orders / AOV selector, while Delivery Performance additionally includes an Order Status slicer.
 
-The report provides working `Order_Details` and `Order_Details Operations` drill-through pages for transaction-level investigation, alongside tooltip pages. The KPI Overview state ranking supports drill-through to underlying orders. Direct transfer of a selected map point to the Delivery page remains a potential enhancement.
+The report provides working `Order_Details` and `Order_Details Operations` drill-through pages for transaction-level investigation, alongside tooltip pages. The KPI Overview state ranking supports drill-through to underlying orders; the Delivery Risk & Impact table supports drill-through for an individual state or the **Others** group. The operations detail page also displays orders when opened directly with no selected state. The order-detail field formerly labeled **Delay Days** now appears as **Days vs Estimate**: a positive number means delivery after the estimate, a negative number means early delivery, and zero means delivery on the estimated date. Direct transfer of a selected map point to the Delivery page remains a potential enhancement.
 
 ### Delivery Risk & Impact ranking rule
 
@@ -853,7 +855,7 @@ Strategic overview containing:
 
 The previous **Top 10 + Others** state table was replaced: the KPI Overview ranking now shows **only the ten leading states** for the selected metric. The rank responds to relevant slicers while preserving the authorized geography under RLS.
 
-The monthly trend uses a **visual-level start cutoff of February 1, 2017** to avoid emphasizing low-volume early 2016 months and a visual-level end cutoff of **August 31, 2018** so that incomplete September 2018 does not distort month-to-month comparisons. These chart-level cutoffs do **not** redefine global KPI totals.
+The monthly trend uses a **visual-level start cutoff of February 1, 2017** to avoid emphasizing low-volume early 2016 months and a visual-level end cutoff of **August 31, 2018** so that incomplete September 2018 does not distort month-to-month comparisons. These chart-level cutoffs do **not** redefine global KPI totals. A dynamic label accompanying the MoM KPI identifies the compared months; in the reference context, **−4.12% means August 2018 vs July 2018**, excluding the incomplete September 2018.
 
 ### Geographic Sales Analysis
 
@@ -863,7 +865,7 @@ Geographical and categorical analysis containing:
 - **Selected Metric by Location** with Revenue / Orders / AOV selection and drill-down through Country / Region / State / City (the report's location hierarchy can be used from Region onward).
 - Geographic map using customer latitude/longitude propagated from PostgreSQL with state/city geographic context.
 - **Top 5 Categories by Revenue**, excluding the earlier misleading subtotal row.
-- A tooltip page showing Selected State, Selected City, Revenue, Orders, Customers, AOV, Regional Revenue Share, Delayed Orders, % On-Time Delivery and **Top City by Orders** for the hovered state.
+- A tooltip page showing Selected State, Selected City, Revenue, Orders, Customers, AOV, Regional Revenue Share, Delayed Orders, **Delayed Order Rate %**, and **Top City by Orders (with order count)** for the hovered state. A verified example for CE identifies **Fortaleza (636 orders)**.
 
 The location chart retains its working hierarchy rather than introducing a synthetic geographic Others category. The existing synchronized Customer State slicer supports cross-page context; direct map-point-to-Delivery transfer remains a potential enhancement, **not** a verified feature.
 
@@ -876,11 +878,11 @@ Customer segmentation analysis containing:
 - Four KPI cards: **Total Customers**, **AOV**, **Orders / Customer** and **Revenue per Customer**.
 - **Customers by RFM Segment** horizontal bar chart, with the small Champion group visible through its data label.
 - **Customer Share % vs Revenue Share %** clustered-column comparison, replacing the older metric-switching revenue/RPC chart.
-- **RFM Customer Behavior** table showing **Avg Recency (Days)**, **Orders / Customer**, **AOV** and **Avg RFM Monetary**, with a total row.
+- **RFM Customer Behavior** table showing **Avg Recency (Days)**, **Orders / Customer**, **AOV**, **Avg RFM Monetary** and **Total Revenue**, with an **Overall** summary row. The indicators retain their appropriate average/ratio logic, while Total Revenue is additive across segments.
 
 The current-share and revenue-share measures represent contributions to the **five-segment purchasing population** under the applicable date/geography/product filters. In the reference dashboard context, Regulars represented approximately 50.73% of customers and 49.94% of revenue; Champions 0.15% of customers and 0.50% of revenue; At risk 1.11% of customers and 2.32% of revenue. Revenue is price plus freight, while RFM Monetary is product price only.
 
-The RFM page intentionally applies a **page-level filter** to omit `NULL` `current_rfm_segment` values, so its KPI cards and segment visuals consistently describe the eligible RFM population. The full segmentation contains **94,983** customers; the difference to the original **95,420**-customer source is explained by **437** ineligible customer identities (431 canceled-only and six unavailable-only).
+The RFM page intentionally applies a **page-level filter** to omit `NULL` `current_rfm_segment` values, so its KPI cards and segment visuals consistently describe the eligible RFM population. The full segmentation contains **94,983** customers; the difference to the original **95,420**-customer source is explained by **437** ineligible customer identities (431 canceled-only and six unavailable-only). The broader **non-canceled** purchasing population has **94,989** customers (six without an RFM segment). The former **~93.98K** RFM value also reflected a narrower selected purchase-date range. The **Champion** segment contains only **143** customers (about **0.15%** of the segmented population), explaining its very small chart bar.
 
 ### Delivery Performance
 
@@ -894,9 +896,9 @@ Operational monitoring containing:
 
 The Delivery Risk & Impact table ranks Top 10 states by delay rate after applying the **100 SLA-eligible orders** qualification rule, and places the remaining states into a weighted **Others** aggregate. Its columns are State, Delayed Orders, Delay Rate and SLA Eligible Orders; conditional colors compare a state to the overall rate (red above overall; navy at/below).
 
-At the reference dashboard dates, the results were **6,509 delayed orders**, **95,453 SLA-eligible orders**, **93.18% on-time delivery**, **10.58 average delay days** and **12.47 average delivery days**. The rebuilt table's delayed count reconciled to 6,509 at the default reference filters; more regression checks under changing state/date/status filters remain appropriate.
+At the reference dashboard dates, the results were **6,509 delayed orders**, **95,453 SLA-eligible orders**, **93.18% on-time delivery**, **10.58 average delay days** and **12.47 average delivery days**. The rebuilt table's delayed count reconciled to 6,509 at the default reference filters, and the operational state/Other drill-through was tested interactively.
 
-The monthly delay-rate line suppresses percentages based on fewer than 100 eligible orders, including misleading very-small-sample peaks; order-volume bars remain visible. September 2018 is excluded at the trend visual level because the dataset contains only the first three days of that month.
+The monthly delay-rate line suppresses percentages based on fewer than 100 eligible orders, including misleading very-small-sample peaks; order-volume bars remain visible. September 2018 is excluded at the trend visual level because the dataset contains only the first three days of that month. The **Operations — Methodology** Help explains SLA eligibility: non-canceled orders require both actual and estimated delivery dates; records without either cannot be classified for SLA rates.
 
 ## Wireframes
 
@@ -1190,7 +1192,7 @@ The following data-quality, deployment and optional model enhancements remain op
 1. **Geolocation quality:** Four current customers across three ZIP prefixes (`46560` / BA, `68275` / PA and `83252` / PR) have coordinates outside approximate Brazil bounds despite valid local addresses. Correct or reject these outliers upstream before ZIP/state aggregation, refresh the warehouse and verify the map. The global coordinate range check did not detect these geographically misplaced but numerically valid coordinates.
 2. **Power BI Service validation:** Validate the Brazil map rendering and Dynamic RLS role membership and identity mapping with appropriate non-admin users before report distribution.
 3. **Inactive date relationships:** Four additional order milestone relationships (approval, carrier handoff, customer delivery and estimated delivery) remain inactive and are not currently used through dedicated `USERELATIONSHIP()` measures. Retain them for milestone reporting or remove them if outside the final scope.
-4. **Geographic navigation (optional enhancement):** The location drill-down and synchronized state slicers work. Direct transfer of a selected map point into Delivery Performance could be added as a dedicated cross-page interaction in a future iteration.
+4. **Geographic navigation:** The location drill-down and synchronized state slicers work. Direct transfer of a selected map point into Delivery Performance could be added as a dedicated cross-page interaction in a future iteration.
 
 ---
 
