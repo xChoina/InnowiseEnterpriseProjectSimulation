@@ -660,7 +660,7 @@ Main deliverables:
 
 ```text
 stage3.ipynb
-Power BI report (.pbix)
+Innowise_Project_Stage3.pbix
 ```
 
 Supporting Stage 3 evidence:
@@ -843,6 +843,11 @@ Target refresh frequency is daily; in the local project environment, SQL and Pow
 
 The model uses a Star Schema and reusable DAX measures to support responsive report interactions. No measured page-load-time benchmark is claimed.
 
+**Visual Validation**
+
+All four Help overlays were reviewed in Power BI Desktop at 80% zoom, with no text clipping observed. Map category labels are enabled, and the geographic tooltip was verified, including state, top city, revenue, orders, customers, AOV, and delayed-order rate.
+
+Power BI Service Reading View validation could not be completed due to account access limitations. This remains a validation limitation, not a confirmed visual defect.
 ---
 
 ## Power BI Report
