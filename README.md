@@ -759,6 +759,11 @@ delivery_days = actual delivery date - order purchase date
 
 delay_days = actual delivery date - estimated delivery date
 ```
+**SLA and Data Quality Validation**
+
+SQL validation confirmed that 1,919 non-canceled order-item rows without an actual delivery date represent 1,735 distinct orders. The difference of 184 rows results from multi-item orders. All 1,735 orders have an estimated delivery date but no recorded actual delivery date, so they are excluded from SLA calculations.
+
+The full-history delayed-order rate is 6.77% (6,534 / 96,470). The dashboard reference period (February 1, 2017 – September 3, 2018) shows 6.82% (6,509 / 95,453). The KPI definition is unchanged; the difference comes from the reporting date range. **The dashboard uses 6.82% for its reference period.**
 
 ### RFM segmentation
 
