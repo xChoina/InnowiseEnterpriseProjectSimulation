@@ -337,3 +337,60 @@ WHERE is_current = TRUE
       OR geolocation_lng NOT BETWEEN -74 AND -34
   )
 ORDER BY customer_state, customer_city;
+
+
+WITH order_level AS (
+    SELECT DISTINCT
+        f.order_id,
+        d.year_month,
+        c.customer_state,
+        f.delayed_flag
+    FROM mart.fact_sales f
+    JOIN mart.dim_date d
+        ON f.order_date_id = d.date_id
+    JOIN mart.dim_customer c
+        ON f.customer_sk = c.customer_sk
+    WHERE d.full_date >= DATE '2018-02-01'
+      AND d.full_date < DATE '2018-04-01'
+      AND f.order_status <> 'canceled'
+),
+state_summary AS (
+    SELECT
+        customer_state,
+        COUNT(*) FILTER (
+            WHERE year_month = '2018-02'
+        ) AS feb_orders,
+        COUNT(*) FILTER (
+            WHERE year_month = '2018-03'
+        ) AS mar_orders,
+        COUNT(*) FILTER (
+            WHERE year_month = '2018-02'
+              AND delayed_flag = 1
+        ) AS feb_delayed,
+        COUNT(*) FILTER (
+            WHERE year_month = '2018-03'
+              AND delayed_flag = 1
+        ) AS mar_delayed,
+        COUNT(*) FILTER (
+            WHERE year_month = '2018-03'
+              AND delayed_flag IS NOT NULL
+        ) AS mar_eligible
+    FROM order_level
+    GROUP BY customer_state
+)
+SELECT
+    customer_state,
+    feb_orders,
+    mar_orders,
+    feb_delayed,
+    mar_delayed,
+    mar_delayed - feb_delayed AS delayed_increase,
+    ROUND(
+        100.0 * mar_delayed / NULLIF(mar_eligible, 0), 2
+    ) AS mar_delay_rate_pct,
+    ROUND(
+        100.0 * mar_delayed
+        / NULLIF(SUM(mar_delayed) OVER (), 0), 2
+    ) AS share_of_march_delays_pct
+FROM state_summary
+ORDER BY delayed_increase DESC;
