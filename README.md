@@ -660,7 +660,7 @@ Main deliverables:
 
 ```text
 stage3.ipynb
-Innowise_Project_Stage3.pbix
+Innowise_Project_Stage3_final_ver2910.pbix
 ```
 
 Supporting Stage 3 evidence:
@@ -726,10 +726,10 @@ The principal Stage 3 measures use the PostgreSQL Mart Star Schema. The warehous
 
 - **Total Revenue** — sum of product price plus freight for non-canceled orders, based on `mart.fact_sales[total_value]`.
 - **Total Orders** — distinct non-canceled `order_id`; distinct counting avoids double-counting multi-item orders.
-- **Average Order Value (AOV)** — Total Revenue / Total Orders.
+- **Average Order Value (AOV)** — Total Revenue / Total Orders (freight included in Revenue).
 - **Total Customers** — distinct purchasing customer identities represented by qualifying non-canceled fact rows within the applicable filter context.
 - **Orders per Customer** — Total Orders / Total Customers.
-- **Revenue per Customer** — Total Revenue / Total Customers.
+- **Revenue per Customer** — Total Revenue / Total Customers (freight included in Revenue).
 - **MoM Growth %** — change between completed reporting months for the selected performance metric, avoiding comparison with incomplete September 2018. At the reference reporting end date of September 3, 2018, the displayed **−4.12%** compares **August 2018 vs July 2018**; a dynamic comparison-period label displays the applicable months.
 - **Average Freight** — mean total freight per distinct qualifying order, not a simple average across order-item rows.
 - **Total Delayed Orders** — distinct non-canceled orders with `delayed_flag = 1`.
@@ -752,18 +752,17 @@ An order is:
 - **Delayed** when actual delivery date > estimated delivery date,
 - **SLA-eligible** only when both actual and estimated delivery dates are available.
 
-**SLA eligibility validation (current full warehouse history):** of **96,478** orders with `delivered` status, **96,470** are SLA-eligible. The remaining **8** lack an actual customer delivery date; none of the delivered-status orders lack an estimated delivery date. Across all non-canceled statuses, **1,735** orders lack an actual customer delivery date (including these eight). Incomplete delivery records are excluded from the on-time and delayed-rate denominators because their timeliness cannot be established. These are full-history figures, not figures for the narrower dashboard date slicer.
+**SLA eligibility validation (full warehouse history):** Among **96,478** distinct orders with status `delivered`, **96,470** are SLA-eligible. The remaining **8** have an estimated delivery date but lack an actual customer delivery date. Across all non-canceled statuses, **1,735 distinct orders** lack an actual customer delivery date, including those eight; **all 1,735 have an estimated delivery date**. These orders remain in the warehouse but cannot be classified as on time or delayed, so they are excluded from SLA rate denominators.
+
+The same missing-actual-date population consists of **1,919 rows** in `mart.fact_sales`, because the fact grain is **one row per order item**. The difference of **184** is additional order-item rows from multi-item orders. SQL confirmed `COUNT(*) = 1,919` and `COUNT(DISTINCT order_id) = 1,735`. Therefore, 1,919 must not be described as distinct orders.
 
 ```text
 delivery_days = actual delivery date - order purchase date
 
 delay_days = actual delivery date - estimated delivery date
 ```
-**SLA and Data Quality Validation**
 
-SQL validation confirmed that 1,919 non-canceled order-item rows without an actual delivery date represent 1,735 distinct orders. The difference of 184 rows results from multi-item orders. All 1,735 orders have an estimated delivery date but no recorded actual delivery date, so they are excluded from SLA calculations.
-
-The full-history delayed-order rate is 6.77% (6,534 / 96,470). The dashboard reference period (February 1, 2017 – September 3, 2018) shows 6.82% (6,509 / 95,453). The KPI definition is unchanged; the difference comes from the reporting date range. **The dashboard uses 6.82% for its reference period.**
+**Reporting-period comparison:** The full-history Delayed Order Rate is **6.77%** (6,534 delayed / 96,470 SLA-eligible). The dashboard's default date selection, **February 1, 2017 – September 3, 2018**, gives **6.82%** (6,509 / 95,453) and **93.18% on-time**. The KPI definition is unchanged; the reporting date window differs. The dashboard's reference-period rate is **6.82%**, not 6.77%.
 
 ### RFM segmentation
 
@@ -785,7 +784,7 @@ Sleeping
 
 The five RFM segments contain **94,983** customers. Another 437 customers are not eligible for segmentation (431 canceled-only and six unavailable-only) and retain `NULL` segment values, rather than an artificial `Not Segmented` label.
 
-For the RFM comparison chart, **Customer Share %** is the segment's purchasing customers divided by customers across the five eligible segments; **Revenue Share %** is the corresponding segment revenue divided by revenue across the five segments. The denominators remove the segment context while retaining applicable date and business selections. RFM Monetary sums product price only; Stage 3 Revenue includes freight. Both measures refer to the SQL-derived **current**, not historical-as-of-order, RFM classification.
+For the RFM comparison chart, **Customer Share %** is the segment's purchasing customers divided by customers across the five eligible segments; **Revenue Share %** is the corresponding segment revenue divided by revenue across the five segments. The denominators remove the segment context while retaining applicable date and business selections. RFM Monetary sums product price only; Stage 3 Revenue includes freight. **Revenue per Customer** divides freight-inclusive revenue by unique customers, **AOV** divides the same revenue by unique orders, and **Avg RFM Monetary** averages customers' product-only RFM monetary values from the segmentation snapshot. All three metrics have different denominators and/or inclusions; they should not be treated as interchangeable. The segmentation refers to the SQL-derived **current**, not historical-as-of-order, RFM classification.
 
 **RFM filter scope:** the page-level filter excludes blank `current_rfm_segment` values by design, so the page focuses on customers assigned to one of the five RFM segments. Its KPI cards and segment visuals use that consistent population. Across the full history, **94,983** customers have an eligible segment versus **94,989** non-canceled purchasing customers (a six-customer difference). A previously observed **~93.98K** RFM card used a narrower purchase-date range; extending it to include earlier purchases increased the displayed count to **~94.98K**. Compare page KPIs only under matching date and business filters.
 
@@ -809,11 +808,11 @@ The report contains four primary business pages, each with four KPI cards and su
 
 The report has a consistent left-side page navigator, Order Date range selection, shared **Customer State**, **City**, **Product Category** and **RFM Segment** slicers, page-specific Reset bookmarks, dynamic titles and contextual Help/tooltip features. Filter selections are synchronized across the four main business pages. KPI Overview includes a Revenue / Orders / AOV selector, while Delivery Performance additionally includes an Order Status slicer.
 
-The report provides working `Order_Details` and `Order_Details Operations` drill-through pages for transaction-level investigation, alongside tooltip pages. The KPI Overview state ranking supports drill-through to underlying orders; the Delivery Risk & Impact table supports drill-through for an individual state or the **Others** group. The operations detail page also displays orders when opened directly with no selected state. The order-detail field formerly labeled **Delay Days** now appears as **Days vs Estimate**: a positive number means delivery after the estimate, a negative number means early delivery, and zero means delivery on the estimated date. Direct transfer of a selected map point to the Delivery page remains a potential enhancement.
+The report provides working `Order_Details` and `Order_Details Operations` drill-through pages for transaction-level investigation, alongside tooltip pages. The KPI Overview state ranking supports drill-through to underlying orders; the Delivery Risk & Impact table supports drill-through for an individual state or the **Others** group. The operations detail page also displays orders when opened directly with no selected state. The order-detail field formerly labeled **Delay Days** now appears as **Days vs Estimate**: a positive number means delivery after the estimate, a negative number means early delivery, and zero means delivery **on** the estimated date. On `Order_Details`, the red conditional formatting was corrected so **only values greater than zero are red**; zero is on time and must not be highlighted as delayed. The matching rule on `Order_Details Operations` should be checked before final publication. Direct transfer of a selected map point to the Delivery page remains a potential enhancement.
 
 ### Delivery Risk & Impact ranking rule
 
-The Delivery table ranks the **Top 10 states by highest delay rate**, subject to a minimum of **100 SLA-eligible orders per state**. Remaining states form an **Others** aggregate; its rate is total delayed / total eligible orders in that group, **not** the simple average of state-level percentages. The table includes State, Delayed Orders, Delay Rate and SLA Eligible Orders. Rates above the overall delay rate are red, while those at or below it are navy. The separate monthly rate trend suppresses values with fewer than 100 eligible orders, without suppressing order-count bars.
+The Delivery table ranks the **Top 10 states by highest delay rate**, subject to a minimum of **100 SLA-eligible orders per state**. Remaining states form an **Others** aggregate; its rate is total delayed / total eligible orders in that group, **not** the simple average of state-level percentages. The table includes State, Delayed Orders, Delay Rate and SLA Eligible Orders. The **Delayed Rate** cells use a **light-to-dark red gradient**, where darker shading indicates higher delay rates; this replaced the earlier binary red/navy rule, which colored all Top 10 states the same. `Others` uses its actual weighted rate on the same scale. The separate monthly rate trend suppresses values with fewer than 100 eligible orders, without suppressing order-count bars. The table's information tooltip must describe the gradient rather than the superseded red/navy legend.
 
 ## Non-Functional & Technical Requirements
 
@@ -823,7 +822,7 @@ The `Dynamic_Security` role reads its user-to-state mapping from the **physical 
 
 The security table is intentionally **disconnected** from the star-schema relationships. The RLS filter is applied on `mart dim_customer`, allowing the existing customer-to-sales relationship to propagate state restrictions. Manager users can be assigned one state or `ALL`; Director users with `ALL` access can view all states. Users absent from the mapping are denied access to protected customer/fact data. The revised role was saved and tested interactively in Power BI Desktop.
 
-**Deployment note:** Power BI Service user identities and role membership must also be verified before external sharing. The five entries are development/test mappings rather than a production identity-management integration.
+**Deployment and validation note:** The `Dynamic_Security` role was published to Power BI Service, but the Service security screen showed **zero role members** at the time of inspection. In Power BI Desktop, the Director test identity (`d1@gmail.com`) correctly showed access to all states and the Manager test identity (`bch@gmail.com`) was limited to SP. A separate Service test with a real, organization-authorized Viewer identity is still required to verify role membership and actual enforcement. The five warehouse entries are development/test mappings, not a production identity-management integration.
 
 ### Advanced DAX
 
@@ -845,14 +844,16 @@ The model uses a Star Schema and reusable DAX measures to support responsive rep
 
 **Visual Validation**
 
-All four Help overlays were reviewed in Power BI Desktop at 80% zoom, with no text clipping observed. Map category labels are enabled, and the geographic tooltip was verified, including state, top city, revenue, orders, customers, AOV, and delayed-order rate.
+- **Power BI Desktop:** All four page Help overlays (KPI Overview, Geographic Sales Analysis, Customer Segmentation RFM and Delivery Performance) were reviewed at **80% zoom**, with no clipped text observed.
+- **Power BI Service Reading View:** The report was published and the geographic **category labels were visible** in the browser. Key visuals rendered after a page reload. An initial visual-query warning indicated Service memory/resource pressure; a recurring issue has not been established.
+- **Map tooltip:** State, Top City by Orders, Revenue, Orders, Customers, AOV and Delayed Order Rate were checked in Desktop (for example, SP → São Paulo, 15,160 orders; CE → Fortaleza, 636 orders).
+- **Remaining checks:** Full Help-overlay clipping review for **all four pages in Service**, Service RLS testing with a real assigned Viewer identity, and a final typography audit for small labels below **10 pt**. These tests should not be recorded as completed until confirmed.
 
-Power BI Service Reading View validation could not be completed due to account access limitations. This remains a validation limitation, not a confirmed visual defect.
 ---
 
 ## Power BI Report
 
-The final interactive report connects to the PostgreSQL Mart layer using Power Query parameters `pServer` and `pDatabase`. The four main pages are supported by tooltip and order-detail drill-through pages. The most recent review of report layout and measures was based on the November 13 reporting definition and corroborating dashboard screenshots; the separately supplied earlier PBIX should not be treated as a final refreshed export.
+The final interactive report uses the PostgreSQL Mart layer through Power Query parameters `pServer` and `pDatabase`. Four main pages are supported by tooltip and order-detail drill-through pages. A project version was published to Power BI Service and the map labels were verified in Reading View. **Desktop edits made after that publication — including the Delivery Risk gradient, the corrected `Days vs Estimate` color threshold, standardized `Champion` wording and the March 2018 Help annotation — must be saved and republished to appear in Service.** A newly published refresh of every one of these latest changes has not yet been independently verified.
 
 ### KPI Overview
 
@@ -879,7 +880,7 @@ Geographical and categorical analysis containing:
 
 The location chart retains its working hierarchy rather than introducing a synthetic geographic Others category. The existing synchronized Customer State slicer supports cross-page context; direct map-point-to-Delivery transfer remains a potential enhancement, **not** a verified feature.
 
-The map requires validation in Power BI Service, and four customer coordinates outside approximate Brazil bounds still require upstream correction. On-time KPI colors use illustrative performance thresholds (green ≥95%, amber 90–<95%, red <90%), not published Olist performance targets.
+The map and its state category labels were checked in Power BI Service Reading View; the four customer coordinates outside approximate Brazil bounds still require upstream correction. On-time KPI colors use illustrative performance thresholds (green ≥95%, amber 90–<95%, red <90%), not published Olist performance targets.
 
 ### Customer Segmentation RFM
 
@@ -890,7 +891,7 @@ Customer segmentation analysis containing:
 - **Customer Share % vs Revenue Share %** clustered-column comparison, replacing the older metric-switching revenue/RPC chart.
 - **RFM Customer Behavior** table showing **Avg Recency (Days)**, **Orders / Customer**, **AOV**, **Avg RFM Monetary** and **Total Revenue**, with an **Overall** summary row. The indicators retain their appropriate average/ratio logic, while Total Revenue is additive across segments.
 
-The current-share and revenue-share measures represent contributions to the **five-segment purchasing population** under the applicable date/geography/product filters. In the reference dashboard context, Regulars represented approximately 50.73% of customers and 49.94% of revenue; Champions 0.15% of customers and 0.50% of revenue; At risk 1.11% of customers and 2.32% of revenue. Revenue is price plus freight, while RFM Monetary is product price only.
+The current-share and revenue-share measures represent contributions to the **five-segment purchasing population** under the applicable date/geography/product filters. In the reference dashboard context, Regulars represented approximately 50.73% of customers and 49.94% of revenue; the **Champion** segment accounted for 0.15% of customers and 0.50% of revenue; At risk accounted for 1.11% of customers and 2.32% of revenue. **Revenue per Customer = (price + freight) / distinct customers; AOV = (price + freight) / distinct orders; Avg RFM Monetary = average customer-level product-price-only Monetary from the RFM snapshot.** These values are comparable as business perspectives, not as identical spending measures.
 
 The RFM page intentionally applies a **page-level filter** to omit `NULL` `current_rfm_segment` values, so its KPI cards and segment visuals consistently describe the eligible RFM population. The full segmentation contains **94,983** customers; the difference to the original **95,420**-customer source is explained by **437** ineligible customer identities (431 canceled-only and six unavailable-only). The broader **non-canceled** purchasing population has **94,989** customers (six without an RFM segment). The former **~93.98K** RFM value also reflected a narrower selected purchase-date range. The **Champion** segment contains only **143** customers (about **0.15%** of the segmented population), explaining its very small chart bar.
 
@@ -904,11 +905,11 @@ Operational monitoring containing:
 - **Order Volume vs Delay Rate** with order-count bars and monthly delay-rate line.
 - An **Order Status** slicer in addition to the shared report filters.
 
-The Delivery Risk & Impact table ranks Top 10 states by delay rate after applying the **100 SLA-eligible orders** qualification rule, and places the remaining states into a weighted **Others** aggregate. Its columns are State, Delayed Orders, Delay Rate and SLA Eligible Orders; conditional colors compare a state to the overall rate (red above overall; navy at/below).
+The Delivery Risk & Impact table ranks the Top 10 states by delay rate after applying the **100 SLA-eligible orders** qualification rule and places the remaining states into a weighted **Others** aggregate. Its columns are State, Delayed Orders, Delayed Rate and SLA Eligible Orders. The Delayed Rate column uses a **sequential light-to-dark red gradient**, with higher rates shown more strongly; **this is not a binary red/navy comparison against the national average**. For example, in the reference view AL (21.57%) is darkest and Others (5.10%) is lightest. The table's existing help tooltip should be updated if it still describes the old color rule.
 
 At the reference dashboard dates, the results were **6,509 delayed orders**, **95,453 SLA-eligible orders**, **93.18% on-time delivery**, **10.58 average delay days** and **12.47 average delivery days**. The rebuilt table's delayed count reconciled to 6,509 at the default reference filters, and the operational state/Other drill-through was tested interactively.
 
-The monthly delay-rate line suppresses percentages based on fewer than 100 eligible orders, including misleading very-small-sample peaks; order-volume bars remain visible. September 2018 is excluded at the trend visual level because the dataset contains only the first three days of that month. The **Operations — Methodology** Help explains SLA eligibility: non-canceled orders require both actual and estimated delivery dates; records without either cannot be classified for SLA rates.
+The **Delayed Order Rate %** monthly line is shown in red to match the risk metric; dark-navy columns represent Total Orders. The line suppresses percentages based on fewer than 100 eligible orders, including misleading very-small-sample peaks; order-volume bars remain visible. September 2018 is excluded at the trend visual level because the dataset contains only the first three days of that month. The chart's **Help tooltip** includes a static annotation of the March 2018 peak (18.96%, 1,328 delayed orders; biggest increases MG +109, SP +87); this annotation refers to the **default unfiltered geographic context** and does not recalculate after slicer changes. The **Operations — Methodology** Help explains SLA eligibility: non-canceled orders require both actual and estimated delivery dates; records without either cannot be classified for SLA rates.
 
 ## Wireframes
 
@@ -943,7 +944,7 @@ The revised RFM page compares the share of purchasing customers with the share o
 | At risk | 1.11% | 2.32% |
 | Champion | 0.15% | 0.50% |
 
-Regulars account for the largest absolute customer and revenue contributions. Champions represent a very small group but a proportionally higher revenue share; At-risk customers likewise contribute more revenue than their population share would suggest.
+Regulars account for the largest absolute customer and revenue contributions. The **Champion** segment is very small but has a proportionally higher revenue share; At-risk customers likewise contribute more revenue than their population share would suggest.
 
 **Hypothesis:** customer count alone understates the commercial contribution of certain smaller, higher-value customer groups.
 
@@ -951,11 +952,29 @@ Regulars account for the largest absolute customer and revenue contributions. Ch
 
 ### Pattern 2 — Delivery risk and delayed-order impact are distinct
 
-The reference period contains **6,509 delayed orders among 95,453 SLA-eligible orders**, corresponding to approximately **6.82% delayed** and **93.18% on-time**. The delivery-duration histogram has its largest group in the **6–10 day** bucket. The updated state table compares delay rates, eligible order volumes and absolute delayed counts.
+The reference dashboard period contains **6,509 delayed orders among 95,453 SLA-eligible orders**, corresponding to approximately **6.82% delayed** and **93.18% on-time**. The delivery-duration histogram has its largest group in the **6–10 day** bucket. The Delivery Risk & Impact table compares percentages, the numbers of late orders and the eligible population: a high relative rate need not imply the greatest absolute volume of late deliveries.
 
-**Hypothesis:** some states have high relative delay risk but relatively few affected orders, while large-volume states can generate a substantial number of delays despite lower percentages. Seasonal or volume peaks can also contribute to logistics pressure, but the current charts do not establish causation.
+**March 2018 Delivery Delay Spike — SQL Validation**
 
-**Business action:** prioritize states using both rates and affected order counts, monitor Order Volume vs Delay Rate, and evaluate logistics capacity before expected demand peaks. The monthly chart suppresses unreliable rate estimates based on fewer than 100 eligible orders.
+The unfiltered monthly view (all customer states, with grouping by **purchase month**) recorded:
+
+| Purchase month | Total orders | Delayed orders | Delayed Order Rate |
+|---|---:|---:|---:|
+| February 2018 | 6,624 | 926 | 14.13% |
+| **March 2018** | **7,168** | **1,328** | **18.96%** |
+| April 2018 | 6,919 | 306 | 4.50% |
+
+From February to March, order volume increased by **544 orders**, while delayed orders increased by **402**, and the Delayed Order Rate rose **4.83 percentage points**. The spike therefore cannot be explained by the increase in order count alone.
+
+The largest increases in the **count of delayed orders** occurred in **Minas Gerais (MG: 66 → 175; +109)** and **São Paulo (SP: 193 → 280; +87)**. Together these increases account for **196 of the 402** additional nationwide delayed orders (**48.8%**). SP had **21.08% of all March delayed orders**, so the peak was **not concentrated in SP alone**. Note the distinction between the state with the largest **increase** (MG), the state with the largest **share** of monthly delayed orders, and the state with the highest **percentage** delay risk; they need not be the same.
+
+The checks were performed against `mart.fact_sales`, `mart.dim_date` and `mart.dim_customer`, using distinct `order_id` and the active order/purchase-date context. These are reproducible analytical checks, not a change to the ETL or SLA definition.
+
+**Hypothesis (not confirmed):** Increased order volume could have contributed to logistics pressure. The data demonstrate the temporal co-occurrence of higher demand and a higher delayed rate, **not** that demand caused the delays. Carrier, route and capacity records would be required to establish an operational cause.
+
+**Business action:** Prioritize follow-up analysis of carrier performance, routes and available capacity in **MG and SP**, while also monitoring high-risk states with smaller samples. Use **Delayed Order Rate, Delayed Orders and SLA Eligible Orders together** to prioritize logistics actions and review capacity before anticipated demand peaks. The monthly line suppresses rates for months with fewer than **100 SLA-eligible orders**; order-volume bars remain visible.
+
+**Dashboard annotation:** The `Order Volume vs Delay Rate` Help tooltip summarizes March as **18.96% delayed (1,328 orders)** and identifies **MG (+109) and SP (+87)** as the two largest month-over-month increases, with the cause explicitly unconfirmed. It is a **static explanation for the default all-state context**; date/state slicers can change the chart's values, but not that text.
 
 ## SQL vs Power BI Validation
 
@@ -1025,7 +1044,7 @@ The current fact-only SQL totals match the current totals using the tested dimen
 
 ### Additional warehouse and RFM validation
 
-The refreshed warehouse and RFM enrichment were checked after the simulated delta load:
+The refreshed warehouse and RFM enrichment were checked after the simulated delta load. The separate February–April 2018 state analysis above also checks the March delay spike using distinct-order counts; the uploaded snapshot of `checks.sql` does not yet contain those two monthly/state queries, so they should be added before claiming the file itself reproduces that analysis:
 
 | Validation | Verified result |
 |---|---:|
@@ -1085,7 +1104,7 @@ Project/
 |
 |-- Stage 3/
 |   |-- stage3.ipynb
-|   |-- Innowise_Project_Stage3.pbix
+|   |-- Innowise_Project_Stage3_final_ver2910.pbix
 |   |-- Dashboard1.png
 |   |-- Dashboard2.png
 |   |-- Dashboard3.png
@@ -1188,10 +1207,10 @@ This notebook contains the requirement-gathering principles, stakeholder intervi
 Open the final interactive Power BI report in Power BI Desktop:
 
 ```text
-Innowise_Project_Stage3.pbix
+Innowise_Project_Stage3_final_ver2910.pbix
 ```
 
-Ensure that PostgreSQL is running and confirm the configured Power Query parameters `pServer` (for example, `localhost`) and `pDatabase` (for example, `olist_dwh`). Refresh the Mart data if necessary, verify the `Dynamic_Security` role and its permitted state access, and confirm that the four business pages and supporting order-detail drill-through pages work as documented. The original source dates extend through **2018-09-03**; the monthly trend charts omit the incomplete last month at visual level.
+**Opening the downloaded PBIX with its embedded Import-mode model does not require PostgreSQL to be running.** PostgreSQL connectivity is needed to **refresh** the imported data: when refreshing, start the database and confirm Power Query parameters `pServer` (for example, `localhost`) and `pDatabase` (for example, `olist_dwh`). Check the `Dynamic_Security` role using Desktop View as; a Service-based Viewer identity test is still pending. Confirm that the four business pages and both order-detail drill-through pages work as documented. The source dates extend through **2018-09-03**, while monthly trend visuals omit that incomplete final month. **Before sharing the PBIX publicly (e.g., on GitHub), remember that it contains imported data; RLS in a downloadable Desktop file is not a substitute for access control over the file itself.**
 
 ---
 
@@ -1200,9 +1219,11 @@ Ensure that PostgreSQL is running and confirm the configured Power Query paramet
 The following data-quality, deployment and optional model enhancements remain open:
 
 1. **Geolocation quality:** Four current customers across three ZIP prefixes (`46560` / BA, `68275` / PA and `83252` / PR) have coordinates outside approximate Brazil bounds despite valid local addresses. Correct or reject these outliers upstream before ZIP/state aggregation, refresh the warehouse and verify the map. The global coordinate range check did not detect these geographically misplaced but numerically valid coordinates.
-2. **Power BI Service validation:** Validate the Brazil map rendering and Dynamic RLS role membership and identity mapping with appropriate non-admin users before report distribution.
+2. **Power BI Service completion:** The report was published and the Brazil map's category labels were verified in Reading View. Still verify **all four Help overlays** in Service and assign/test the `Dynamic_Security` role with a real organization-authorized **Viewer** identity before external sharing. Desktop RLS simulations are successful, but do not replace that Service test.
 3. **Inactive date relationships:** Four additional order milestone relationships (approval, carrier handoff, customer delivery and estimated delivery) remain inactive and are not currently used through dedicated `USERELATIONSHIP()` measures. Retain them for milestone reporting or remove them if outside the final scope.
 4. **Geographic navigation:** The location drill-down and synchronized state slicers work. Direct transfer of a selected map point into Delivery Performance could be added as a dedicated cross-page interaction in a future iteration.
+5. **Final usability consistency:** Verify or update the Delivery Risk information tooltip to describe the **red gradient**, not the superseded red/navy threshold; audit remaining chart/table fonts and increase any text below **10 pt** where practical; check that `Days vs Estimate = 0` is non-red on both detail pages. Save the final Desktop changes and republish the updated PBIX.
+6. **SQL check reproducibility:** Include the February–April monthly summary and February-to-March state-increase validation queries in `checks.sql` if not already added locally. The SQL analyses are verified in the notebook discussion, but the supplied `checks.sql` version does not yet contain them.
 
 ---
 
