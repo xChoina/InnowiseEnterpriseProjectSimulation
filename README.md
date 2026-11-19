@@ -660,7 +660,7 @@ Main deliverables:
 
 ```text
 stage3.ipynb
-Innowise_Project_Stage3_final_ver2910.pbix
+Innowise_Project_Stage3.pbix
 ```
 
 Supporting Stage 3 evidence:
@@ -1104,7 +1104,7 @@ Project/
 |
 |-- Stage 3/
 |   |-- stage3.ipynb
-|   |-- Innowise_Project_Stage3_final_ver2910.pbix
+|   |-- Innowise_Project_Stage3.pbix
 |   |-- Dashboard1.png
 |   |-- Dashboard2.png
 |   |-- Dashboard3.png
@@ -1207,7 +1207,7 @@ This notebook contains the requirement-gathering principles, stakeholder intervi
 Open the final interactive Power BI report in Power BI Desktop:
 
 ```text
-Innowise_Project_Stage3_final_ver2910.pbix
+Innowise_Project_Stage3.pbix
 ```
 
 **Opening the downloaded PBIX with its embedded Import-mode model does not require PostgreSQL to be running.** PostgreSQL connectivity is needed to **refresh** the imported data: when refreshing, start the database and confirm Power Query parameters `pServer` (for example, `localhost`) and `pDatabase` (for example, `olist_dwh`). Check the `Dynamic_Security` role using Desktop View as; a Service-based Viewer identity test is still pending. Confirm that the four business pages and both order-detail drill-through pages work as documented. The source dates extend through **2018-09-03**, while monthly trend visuals omit that incomplete final month. **Before sharing the PBIX publicly (e.g., on GitHub), remember that it contains imported data; RLS in a downloadable Desktop file is not a substitute for access control over the file itself.**
