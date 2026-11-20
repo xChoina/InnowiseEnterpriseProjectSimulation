@@ -4,7 +4,7 @@ End-to-end analytics project based on the **Brazilian E-Commerce Public Dataset 
 
 Dataset: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
-Large project files (including the Power BI deliverable, where uploaded) are shared through the [project's Google Drive folder](https://drive.google.com/drive/folders/17D5ruFOP2abx_2WDHfSYO2Ie8TYE5-0n?usp=sharing). The folder link is a shared project location, not a verified direct link to a specific `.pbix` file.
+The final Power BI deliverable is maintained in the project repository as `Innowise_Project_Stage3.pbix`.
 
 The project covers three roles and stages:
 
@@ -806,13 +806,13 @@ The report contains four primary business pages, each with four KPI cards and su
 
 ### Navigation, filters and investigation
 
-The report has a consistent left-side page navigator, Order Date range selection, shared **Customer State**, **City**, **Product Category** and **RFM Segment** slicers, page-specific Reset bookmarks, dynamic titles and contextual Help/tooltip features. Filter selections are synchronized across the four main business pages. KPI Overview includes a Revenue / Orders / AOV selector, while Delivery Performance additionally includes an Order Status slicer.
+The report has a consistent left-side page navigator, Order Date range selection, shared **Customer State**, **City**, **Product Category** and **RFM Segment** slicers, page-specific Reset bookmarks, dynamic titles and contextual Help/tooltip features. Filter selections are synchronized across the four main business pages. Help bookmarks display guidance without changing active data filters, while page-specific Reset bookmarks restore the saved default filter context. KPI Overview includes a Revenue / Orders / AOV selector, while Delivery Performance additionally includes an Order Status slicer.
 
-The report provides working `Order_Details` and `Order_Details Operations` drill-through pages for transaction-level investigation, alongside tooltip pages. The KPI Overview state ranking supports drill-through to underlying orders; the Delivery Risk & Impact table supports drill-through for an individual state or the **Others** group. The operations detail page also displays orders when opened directly with no selected state. The order-detail field formerly labeled **Delay Days** now appears as **Days vs Estimate**: a positive number means delivery after the estimate, a negative number means early delivery, and zero means delivery **on** the estimated date. On `Order_Details`, the red conditional formatting was corrected so **only values greater than zero are red**; zero is on time and must not be highlighted as delayed. The matching rule on `Order_Details Operations` should be checked before final publication. Direct transfer of a selected map point to the Delivery page remains a potential enhancement.
+The report provides working `Order_Details` and `Order_Details Operations` drill-through pages for transaction-level investigation, alongside tooltip pages. The KPI Overview state ranking supports drill-through to underlying orders; the Delivery Risk & Impact table supports drill-through for an individual state or the **Others** group. Both `Order_Details` and `Order_Details Operations` can be opened directly without an inherited state selection and display order-level records. Both use **Days vs Estimate**: positive values indicate delivery after the estimate, negative values indicate early delivery, and zero indicates delivery **on** the estimated date. Red conditional formatting is applied only to positive values on both detail pages. Direct transfer of a selected map point to the Delivery page remains a potential enhancement.
 
 ### Delivery Risk & Impact ranking rule
 
-The Delivery table ranks the **Top 10 states by highest delay rate**, subject to a minimum of **100 SLA-eligible orders per state**. Remaining states form an **Others** aggregate; its rate is total delayed / total eligible orders in that group, **not** the simple average of state-level percentages. The table includes State, Delayed Orders, Delay Rate and SLA Eligible Orders. The **Delayed Rate** cells use a **light-to-dark red gradient**, where darker shading indicates higher delay rates; this replaced the earlier binary red/navy rule, which colored all Top 10 states the same. `Others` uses its actual weighted rate on the same scale. The separate monthly rate trend suppresses values with fewer than 100 eligible orders, without suppressing order-count bars. The table's information tooltip must describe the gradient rather than the superseded red/navy legend.
+The Delivery table ranks the **Top 10 states by highest delay rate**, subject to a minimum of **100 SLA-eligible orders per state**. Remaining states form an **Others** aggregate; its rate is total delayed / total eligible orders in that group, **not** the simple average of state-level percentages. The table includes State, Delayed Orders, Delay Rate and SLA Eligible Orders. The **Delayed Rate** cells use a **light-to-dark red gradient**, where darker shading indicates higher delay rates. `Others` uses its actual weighted rate on the same scale, and the table's information tooltip explains this formatting. The separate monthly rate trend suppresses values with fewer than 100 SLA-eligible orders, without suppressing order-count bars.
 
 ## Non-Functional & Technical Requirements
 
@@ -822,7 +822,7 @@ The `Dynamic_Security` role reads its user-to-state mapping from the **physical 
 
 The security table is intentionally **disconnected** from the star-schema relationships. The RLS filter is applied on `mart dim_customer`, allowing the existing customer-to-sales relationship to propagate state restrictions. Manager users can be assigned one state or `ALL`; Director users with `ALL` access can view all states. Users absent from the mapping are denied access to protected customer/fact data. The revised role was saved and tested interactively in Power BI Desktop.
 
-**Deployment and validation note:** The `Dynamic_Security` role was published to Power BI Service, but the Service security screen showed **zero role members** at the time of inspection. In Power BI Desktop, the Director test identity (`d1@gmail.com`) correctly showed access to all states and the Manager test identity (`bch@gmail.com`) was limited to SP. A separate Service test with a real, organization-authorized Viewer identity is still required to verify role membership and actual enforcement. The five warehouse entries are development/test mappings, not a production identity-management integration.
+**Desktop RLS validation:** The Director test identity (`d1@gmail.com`) correctly showed access to all states, while the Manager test identity (`bch@gmail.com`) was limited to SP. The five warehouse entries are development/test mappings, not a production identity-management integration.
 
 ### Advanced DAX
 
@@ -845,15 +845,13 @@ The model uses a Star Schema and reusable DAX measures to support responsive rep
 **Visual Validation**
 
 - **Power BI Desktop:** All four page Help overlays (KPI Overview, Geographic Sales Analysis, Customer Segmentation RFM and Delivery Performance) were reviewed at **80% zoom**, with no clipped text observed.
-- **Power BI Service Reading View:** The report was published and the geographic **category labels were visible** in the browser. Key visuals rendered after a page reload. An initial visual-query warning indicated Service memory/resource pressure; a recurring issue has not been established.
 - **Map tooltip:** State, Top City by Orders, Revenue, Orders, Customers, AOV and Delayed Order Rate were checked in Desktop (for example, SP → São Paulo, 15,160 orders; CE → Fortaleza, 636 orders).
-- **Remaining checks:** Full Help-overlay clipping review for **all four pages in Service**, Service RLS testing with a real assigned Viewer identity, and a final typography audit for small labels below **10 pt**. These tests should not be recorded as completed until confirmed.
 
 ---
 
 ## Power BI Report
 
-The final interactive report uses the PostgreSQL Mart layer through Power Query parameters `pServer` and `pDatabase`. Four main pages are supported by tooltip and order-detail drill-through pages. A project version was published to Power BI Service and the map labels were verified in Reading View. **Desktop edits made after that publication — including the Delivery Risk gradient, the corrected `Days vs Estimate` color threshold, standardized `Champion` wording and the March 2018 Help annotation — must be saved and republished to appear in Service.** A newly published refresh of every one of these latest changes has not yet been independently verified.
+The final interactive report uses the PostgreSQL Mart layer through Power Query parameters `pServer` and `pDatabase`. Four main pages are supported by tooltip and order-detail drill-through pages. The repository file `Innowise_Project_Stage3.pbix` is the primary Power BI deliverable.
 
 ### KPI Overview
 
@@ -880,7 +878,7 @@ Geographical and categorical analysis containing:
 
 The location chart retains its working hierarchy rather than introducing a synthetic geographic Others category. The existing synchronized Customer State slicer supports cross-page context; direct map-point-to-Delivery transfer remains a potential enhancement, **not** a verified feature.
 
-The map and its state category labels were checked in Power BI Service Reading View; the four customer coordinates outside approximate Brazil bounds still require upstream correction. On-time KPI colors use illustrative performance thresholds (green ≥95%, amber 90–<95%, red <90%), not published Olist performance targets.
+The four customer coordinates outside approximate Brazil bounds still require upstream correction. On-time KPI colors use illustrative performance thresholds (green ≥95%, amber 90–<95%, red <90%), not official Olist performance targets.
 
 ### Customer Segmentation RFM
 
@@ -905,11 +903,11 @@ Operational monitoring containing:
 - **Order Volume vs Delay Rate** with order-count bars and monthly delay-rate line.
 - An **Order Status** slicer in addition to the shared report filters.
 
-The Delivery Risk & Impact table ranks the Top 10 states by delay rate after applying the **100 SLA-eligible orders** qualification rule and places the remaining states into a weighted **Others** aggregate. Its columns are State, Delayed Orders, Delayed Rate and SLA Eligible Orders. The Delayed Rate column uses a **sequential light-to-dark red gradient**, with higher rates shown more strongly; **this is not a binary red/navy comparison against the national average**. For example, in the reference view AL (21.57%) is darkest and Others (5.10%) is lightest. The table's existing help tooltip should be updated if it still describes the old color rule.
+The Delivery Risk & Impact table ranks the Top 10 states by delay rate after applying the **100 SLA-eligible orders** qualification rule and places the remaining states into a weighted **Others** aggregate. Its columns are State, Delayed Orders, Delayed Rate and SLA Eligible Orders. The Delayed Rate column uses a **sequential light-to-dark red gradient**, with higher rates shown more strongly. For example, in the reference view AL (21.57%) is darkest and Others (5.10%) is lightest. The information tooltip explains the gradient.
 
 At the reference dashboard dates, the results were **6,509 delayed orders**, **95,453 SLA-eligible orders**, **93.18% on-time delivery**, **10.58 average delay days** and **12.47 average delivery days**. The rebuilt table's delayed count reconciled to 6,509 at the default reference filters, and the operational state/Other drill-through was tested interactively.
 
-The **Delayed Order Rate %** monthly line is shown in red to match the risk metric; dark-navy columns represent Total Orders. The line suppresses percentages based on fewer than 100 eligible orders, including misleading very-small-sample peaks; order-volume bars remain visible. September 2018 is excluded at the trend visual level because the dataset contains only the first three days of that month. The chart's **Help tooltip** includes a static annotation of the March 2018 peak (18.96%, 1,328 delayed orders; biggest increases MG +109, SP +87); this annotation refers to the **default unfiltered geographic context** and does not recalculate after slicer changes. The **Operations — Methodology** Help explains SLA eligibility: non-canceled orders require both actual and estimated delivery dates; records without either cannot be classified for SLA rates.
+The **Delayed Order Rate %** monthly line is shown in red to match the risk metric; dark-navy columns represent Total Orders. The line suppresses percentages based on fewer than 100 SLA-eligible orders under the active filters, including misleading very-small-sample peaks; order-volume bars remain visible. A visible note on the chart states: **“Delayed Order Rate is hidden for months with fewer than 100 SLA-eligible orders.”** September 2018 is excluded at the trend visual level because the dataset contains only the first three days of that month. The chart's **Help tooltip** includes a static annotation of the March 2018 peak (18.96%, 1,328 delayed orders; biggest increases MG +109, SP +87); this annotation refers to the **default unfiltered geographic context** and does not recalculate after slicer changes. The **Operations — Methodology** Help explains SLA eligibility: non-canceled orders require both actual and estimated delivery dates; records without either cannot be classified for SLA rates.
 
 ## Wireframes
 
@@ -1044,7 +1042,7 @@ The current fact-only SQL totals match the current totals using the tested dimen
 
 ### Additional warehouse and RFM validation
 
-The refreshed warehouse and RFM enrichment were checked after the simulated delta load. The separate February–April 2018 state analysis above also checks the March delay spike using distinct-order counts; the uploaded snapshot of `checks.sql` does not yet contain those two monthly/state queries, so they should be added before claiming the file itself reproduces that analysis:
+The refreshed warehouse and RFM enrichment were checked after the simulated delta load. The February–April 2018 monthly and state-level analysis above separately validates the March delay spike using distinct-order counts:
 
 | Validation | Verified result |
 |---|---:|
@@ -1210,20 +1208,18 @@ Open the final interactive Power BI report in Power BI Desktop:
 Innowise_Project_Stage3.pbix
 ```
 
-**Opening the downloaded PBIX with its embedded Import-mode model does not require PostgreSQL to be running.** PostgreSQL connectivity is needed to **refresh** the imported data: when refreshing, start the database and confirm Power Query parameters `pServer` (for example, `localhost`) and `pDatabase` (for example, `olist_dwh`). Check the `Dynamic_Security` role using Desktop View as; a Service-based Viewer identity test is still pending. Confirm that the four business pages and both order-detail drill-through pages work as documented. The source dates extend through **2018-09-03**, while monthly trend visuals omit that incomplete final month. **Before sharing the PBIX publicly (e.g., on GitHub), remember that it contains imported data; RLS in a downloadable Desktop file is not a substitute for access control over the file itself.**
+**Opening the downloaded PBIX with its embedded Import-mode model does not require PostgreSQL to be running.** PostgreSQL connectivity is needed to **refresh** the imported data: when refreshing, start the database and confirm Power Query parameters `pServer` (for example, `localhost`) and `pDatabase` (for example, `olist_dwh`). Check the `Dynamic_Security` role using Power BI Desktop **View as**. Confirm that the four business pages and both order-detail drill-through pages work as documented. The source dates extend through **2018-09-03**, while monthly trend visuals omit that incomplete final month. **Before sharing the PBIX publicly (e.g., on GitHub), remember that it contains imported data; RLS in a downloadable Desktop file is not a substitute for access control over the file itself.**
 
 ---
 
 # Outstanding Items
 
-The following data-quality, deployment and optional model enhancements remain open:
+The following data-quality and optional model enhancements remain open:
 
 1. **Geolocation quality:** Four current customers across three ZIP prefixes (`46560` / BA, `68275` / PA and `83252` / PR) have coordinates outside approximate Brazil bounds despite valid local addresses. Correct or reject these outliers upstream before ZIP/state aggregation, refresh the warehouse and verify the map. The global coordinate range check did not detect these geographically misplaced but numerically valid coordinates.
-2. **Power BI Service completion:** The report was published and the Brazil map's category labels were verified in Reading View. Still verify **all four Help overlays** in Service and assign/test the `Dynamic_Security` role with a real organization-authorized **Viewer** identity before external sharing. Desktop RLS simulations are successful, but do not replace that Service test.
-3. **Inactive date relationships:** Four additional order milestone relationships (approval, carrier handoff, customer delivery and estimated delivery) remain inactive and are not currently used through dedicated `USERELATIONSHIP()` measures. Retain them for milestone reporting or remove them if outside the final scope.
-4. **Geographic navigation:** The location drill-down and synchronized state slicers work. Direct transfer of a selected map point into Delivery Performance could be added as a dedicated cross-page interaction in a future iteration.
-5. **Final usability consistency:** Verify or update the Delivery Risk information tooltip to describe the **red gradient**, not the superseded red/navy threshold; audit remaining chart/table fonts and increase any text below **10 pt** where practical; check that `Days vs Estimate = 0` is non-red on both detail pages. Save the final Desktop changes and republish the updated PBIX.
-6. **SQL check reproducibility:** Include the February–April monthly summary and February-to-March state-increase validation queries in `checks.sql` if not already added locally. The SQL analyses are verified in the notebook discussion, but the supplied `checks.sql` version does not yet contain them.
+2. **Inactive date relationships:** Four additional order milestone relationships (approval, carrier handoff, customer delivery and estimated delivery) remain inactive and are not currently used through dedicated `USERELATIONSHIP()` measures. Retain them for milestone reporting or remove them if outside the final scope.
+3. **Geographic navigation:** The location drill-down and synchronized state slicers work. Direct transfer of a selected map point into Delivery Performance could be added as a dedicated cross-page interaction in a future iteration.
+
 
 ---
 
