@@ -48,8 +48,8 @@ SELECT
 
 FROM (
     SELECT generate_series(
-        '2016-01-01'::DATE,
-        '2025-12-31'::DATE,
+        '2016-09-04'::DATE,
+		'2018-10-25'::DATE,
         '1 day'::INTERVAL
     )::DATE AS datum
 ) d

@@ -228,8 +228,8 @@ SELECT
     day_of_week
 FROM mart.dim_date
 WHERE full_date IN (
-    '2024-01-15',
-    '2024-02-20'
+    '2016-09-04',
+    '2018-10-25'
 )
 ORDER BY full_date;
 
