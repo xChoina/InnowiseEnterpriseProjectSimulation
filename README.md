@@ -534,7 +534,9 @@ day
 day_of_week
 ```
 
-The SQL generates the calendar from `2016-01-01` through `2025-12-31`.
+The SQL generates the reporting calendar from `2016-09-04` through `2018-10-25`, containing **782 consecutive dates**. The calendar covers the full range of five order-related date keys in `mart.fact_sales`, including actual and estimated delivery dates.
+
+Order purchases end on `2018-09-03`, while estimated deliveries extend to `2018-10-25`. Therefore, the calendar extends beyond the final purchase date without introducing additional sales transactions.
 
 ### Mart idempotency
 
@@ -830,7 +832,11 @@ The report uses reusable DAX measures, dynamic metric-selection titles, context-
 
 `Current RFM Segment` is **no longer calculated row by row in DAX**; the model uses the SQL-derived `current_rfm_segment`. On-time classification uses strict `delayed_flag == 0` to avoid counting blanks as on-time.
 
-The warehouse date dimension `mart.dim_date` provides the reporting calendar and supports the active order-date relationship.
+The reporting calendar is provided by `mart.dim_date`, containing **782 dates from September 4, 2016, through October 25, 2018**. Power BI Auto date/time is disabled, and `mart dim_date` is marked as the Date Table using the `full_date` column.
+
+The active relationship uses `order_date_id` to filter transactions by purchase date. The four additional order milestone date relationships remain inactive.
+
+After the calendar adjustment, SQL and Power BI were reconciled successfully: **98,205 Total Orders**, **R$ 15,737,667.52 Total Revenue**, and **6,534 Total Delayed Orders** for the full warehouse history. The monthly trend and MoM comparison were also verified.
 
 ### Data model and performance
 
